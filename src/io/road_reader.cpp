@@ -242,7 +242,12 @@ bool RoadReader::handleCoordinateSystem() {
                 coordinate_system_epsg_ = utm_epsg;
                 OGRSpatialReference target_srs;
                 target_srs.importFromEPSG(utm_epsg);
-                coordinate_system_wkt_ = target_srs.exportToWkt();
+                char *wkt = nullptr;
+                target_srs.exportToWkt(&wkt);
+                if (wkt) {
+                    coordinate_system_wkt_ = wkt;
+                    CPLFree(wkt);
+                }
                 std::cout << "Successfully created UTM transformation to EPSG:" << utm_epsg << std::endl;
             } else {
                 std::cerr << "ERROR: Failed to create coordinate transformation for EPSG:4326 to UTM zone EPSG:" << utm_epsg << std::endl;
