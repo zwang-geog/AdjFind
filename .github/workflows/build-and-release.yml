@@ -11,24 +11,20 @@ jobs:
     # Using older OS versions for better backward compatibility
     # Ubuntu 18.04 → Compatible with Ubuntu 16.04+, Debian 9+, CentOS 7+
     # macOS 12 → Compatible with macOS 10.15+  
-    # Windows 2019 → Compatible with Windows 10 1809+
+    # Windows builds → Built locally with Visual Studio 2022 Community
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [ubuntu-18.04, macos-12, windows-2019]
+        os: [ubuntu-18.04, macos-12]
         include:
           - os: ubuntu-18.04
             package_manager: apt
-            gdal_version: "2.4.0"
+            gdal_version: "auto-detected"
             compatibility_note: "Compatible with Ubuntu 16.04+, Debian 9+, CentOS 7+"
           - os: macos-12
             package_manager: brew
-            gdal_version: "3.4.0"
+            gdal_version: "auto-detected"
             compatibility_note: "Compatible with macOS 10.15+"
-          - os: windows-2019
-            package_manager: choco
-            gdal_version: "3.4.0"
-            compatibility_note: "Compatible with Windows 10 1809+"
 
     steps:
     - name: Checkout code
@@ -44,20 +40,19 @@ jobs:
         version: 9
 
     - name: Install dependencies (Ubuntu)
-      if: matrix.os == 'ubuntu-latest'
+      if: matrix.os == 'ubuntu-18.04'
       run: |
         sudo apt-get update
         sudo apt-get install -y libgdal-dev libboost-all-dev nlohmann-json3-dev
+        echo "Installed GDAL version: $(gdal-config --version)"
+        echo "Installed Boost version: $(dpkg -l | grep libboost | head -1)"
 
     - name: Install dependencies (macOS)
-      if: matrix.os == 'macos-latest'
+      if: matrix.os == 'macos-12'
       run: |
         brew install gdal boost nlohmann-json
-
-    - name: Install dependencies (Windows)
-      if: matrix.os == 'windows-latest'
-      run: |
-        choco install gdal boost nlohmann-json
+        echo "Installed GDAL version: $(gdal-config --version)"
+        echo "Installed Boost version: $(brew list --versions boost | head -1)"
 
     - name: Create build directory
       run: mkdir build
@@ -98,9 +93,5 @@ jobs:
         files: |
           artifacts/adjfind-ubuntu-18.04-Ubuntu 16.04+, Debian 9+, CentOS 7+/adjfind
           artifacts/adjfind-macos-12-macOS 10.15+/adjfind
-          artifacts/adjfind-windows-2019-Windows 10 1809+/adjfind.exe
-        draft: false
-        prerelease: false
-        generate_release_notes: true
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

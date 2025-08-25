@@ -178,7 +178,7 @@ The second output dataset is a point dataset with "_least_accessible_point" appe
 
 * Points do not need to be at network intersection nor on the road linestring. A Euclidean-distance based snapping will be performed to snap points to their nearest road edges. However, it is still recommended to make sure the point is closest to the desired road linestring manually by user.
 
-## Building and Installation
+## Building and Installation (for developers)
 
 ### Prerequisites
 
@@ -192,20 +192,31 @@ Before building this project, ensure you have the following dependencies install
 
 ### Installing Dependencies
 
+**Note on Linking Strategy:**
+- **GDAL**: Dynamically linked - must be installed on the target system
+- **Boost**: Mixed approach - geometry (header-only), system/filesystem (compiled but statically linked) - no runtime installation needed  
+- **nlohmann_json**: Header-only library - included in the binary
+- **Standard libraries**: Partially statically linked for better compatibility
+
 #### On Ubuntu/Debian:
 ```bash
 sudo apt update
-sudo apt install cmake build-essential libgdal-dev
+sudo apt install cmake build-essential libgdal-dev libboost-all-dev nlohmann-json3-dev
 ```
 
 #### On macOS (using Homebrew):
 ```bash
-brew install cmake gdal
+brew install cmake gdal boost nlohmann-json
 ```
 
 #### On Windows:
+- Install [Visual Studio 2022 Community](https://visualstudio.microsoft.com/downloads/) (free)
 - Install [CMake](https://cmake.org/download/)
-- Install [GDAL](https://gdal.org/download.html) or use [OSGeo4W](https://trac.osgeo.org/osgeo4w/)
+- Install dependencies via vcpkg:
+  ```bash
+  winget install Microsoft.vcpkg
+  vcpkg install gdal:x64-windows boost:x64-windows nlohmann-json:x64-windows
+  ```
 
 ### Building the Project
 
@@ -231,6 +242,36 @@ cmake --build . --config Release  # On Windows
 ```bash
 sudo make install
 ```
+
+### Runtime Dependencies (for users)
+
+**GDAL must be available on the target system (If user has QGIS or geopandas installed, likely no further action is needed):**
+
+#### Linux:
+```bash
+# Ubuntu/Debian (newest versions - recommended)
+sudo apt update
+sudo apt install libgdal-dev
+
+# CentOS/RHEL
+sudo yum install gdal
+
+# Note: Boost is header-only, no runtime installation needed
+```
+
+#### macOS:
+```bash
+# Install newest versions (recommended)
+brew update
+brew install gdal boost
+
+# Or install specific versions if needed
+# brew install gdal@3.4 boost@1.82
+```
+
+#### Windows:
+- GDAL is included with the vcpkg installation
+- Ensure the vcpkg environment is properly configured
 
 ## Disclaimer
 
