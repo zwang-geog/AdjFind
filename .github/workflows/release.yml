@@ -101,6 +101,9 @@ jobs:
   create-release:
     needs: [build-linux, build-macos, build-windows]
     runs-on: ubuntu-latest
+    permissions:
+      contents: write      # This is required for creating releases
+      id-token: write     # This is required for GitHub token authentication
     steps:
       - name: Download artifacts
         uses: actions/download-artifact@v4
@@ -112,5 +115,8 @@ jobs:
             adjfind-linux/*
             adjfind-macos/*
             adjfind-windows/*
+          generate_release_notes: true    # Automatically generate release notes from commits
+          draft: false                    # Create a published release
+          prerelease: false              # Mark as full release, not pre-release
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
