@@ -53,27 +53,45 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       
+      - name: Add MSBuild to PATH
+        uses: microsoft/setup-msbuild@v1.1
+      
       - name: Setup vcpkg
-        uses: lukka/run-vcpkg@v11
+        run: |
+          git clone https://github.com/Microsoft/vcpkg.git
+          .\vcpkg\bootstrap-vcpkg.bat
+          .\vcpkg\vcpkg integrate install
+      
+      - name: Cache vcpkg packages
+        uses: actions/cache@v3
         with:
-          vcpkgGitCommitId: 'a42af01b72c28a8e1d7b48107b33e4f286a55ef6'
+          path: |
+            ${{ github.workspace }}/vcpkg/installed
+            ${{ github.workspace }}/vcpkg/packages
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('**/vcpkg.json') }}
+          restore-keys: |
+            vcpkg-${{ runner.os }}-
       
       - name: Install dependencies
         run: |
-          vcpkg install gdal:x64-windows boost:x64-windows nlohmann-json:x64-windows
-      
-      - name: Build
+          .\vcpkg\vcpkg install gdal:x64-windows boost:x64-windows nlohmann-json:x64-windows --clean-after-build
+        
+      - name: Configure CMake
         run: |
           mkdir build
           cd build
-          cmake .. -DCMAKE_TOOLCHAIN_FILE=$VCPKG_ROOT/scripts/buildsystems/vcpkg.cmake
+          cmake .. -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake -DCMAKE_BUILD_TYPE=Release -A x64
+        
+      - name: Build
+        run: |
+          cd build
           cmake --build . --config Release
-      
+        
       - name: Create package
         run: |
           cd build
           cpack -G ZIP -C Release
-      
+        
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:

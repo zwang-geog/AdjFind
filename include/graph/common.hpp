@@ -6,6 +6,7 @@
 #include <tuple>
 #include <limits>
 #include <unordered_set>
+#include <optional>
 #include <boost/geometry.hpp>
 #include <boost/geometry/geometries/point.hpp>
 #include <boost/geometry/geometries/linestring.hpp>
