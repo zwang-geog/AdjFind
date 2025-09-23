@@ -37,6 +37,18 @@ jobs:
         run: |
           brew install cmake gdal boost nlohmann-json
       
+      - name: Verify Boost installation
+        run: |
+          echo "=== Boost Installation Verification ==="
+          echo "Homebrew prefix: $(brew --prefix)"
+          echo "Boost version: $(brew list boost --versions)"
+          echo "Boost libraries:"
+          ls -la $(brew --prefix)/lib/libboost*
+          echo "Boost headers:"
+          ls -la $(brew --prefix)/include/boost/
+          echo "Boost CMake files:"
+          ls -la $(brew --prefix)/lib/cmake/Boost-*
+      
       - name: Build
         run: |
           chmod +x scripts/build.sh
