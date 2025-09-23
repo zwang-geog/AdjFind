@@ -38,14 +38,34 @@ done
 mkdir -p "$BUILD_DIR"
 cd "$BUILD_DIR"
 
-# Configure CMAKE_PREFIX_PATH for macOS
+# Configure Boost paths for macOS
 CMAKE_PREFIX_ARGS=""
+echo "Detected OS: $OSTYPE"
 if [[ "$OSTYPE" == "darwin"* ]]; then
-    # On macOS, add Homebrew paths for Boost and other dependencies
+    echo "macOS detected, configuring Boost paths..."
+    
+    # On macOS, add Homebrew paths for other dependencies
     if command -v brew &> /dev/null; then
+        echo "Homebrew found, getting prefix..."
         HOMEBREW_PREFIX=$(brew --prefix)
+        echo "Homebrew prefix: $HOMEBREW_PREFIX"
         CMAKE_PREFIX_ARGS="-DCMAKE_PREFIX_PATH=$HOMEBREW_PREFIX"
+    else
+        echo "Homebrew not found"
     fi
+    
+    # Use downloaded Boost instead of Homebrew Boost
+    echo "Checking for downloaded Boost directory..."
+    if [[ -d "boost" ]]; then
+        echo "Found boost directory, setting Boost_ROOT to: $PWD/boost"
+        CMAKE_PREFIX_ARGS="$CMAKE_PREFIX_ARGS -DBoost_ROOT=$PWD/boost -DBoost_NO_BOOST_CMAKE=ON"
+    else
+        echo "Boost directory not found at: $PWD/boost"
+    fi
+    
+    echo "Final CMAKE_PREFIX_ARGS: $CMAKE_PREFIX_ARGS"
+else
+    echo "Not macOS, skipping Boost configuration"
 fi
 
 # Configure with CMake
@@ -53,7 +73,7 @@ cmake .. \
     -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
     -DCMAKE_INSTALL_PREFIX="$INSTALL_PREFIX" \
     -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
-    $CMAKE_PREFIX_ARGS
+    $CMAKE_PREFIX_ARGS 
 
 # Build
 cmake --build . --config "$BUILD_TYPE" -j$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 1)
