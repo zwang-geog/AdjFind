@@ -3,9 +3,8 @@
 
 #include <string>
 #include <vector>
-#include <ogrsf_frmts.h>
 #include "graph/common.hpp"
-#include "io/gdal_utils.hpp"
+#include "io/geojson_writer.hpp"
 
 namespace adjfind {
 namespace io {
@@ -14,22 +13,21 @@ namespace io {
  * Configuration for road segmentation output writer
  */
 struct RoadSegmentationWriterConfig {
-    std::string output_file_path;     // Output file path with extension
-    std::string crs_wkt;              // Coordinate reference system WKT (optional)
-    bool reproject_to_epsg4326;       // Whether to reproject output to EPSG:4326
+    std::string output_file_path;     // Output file path (GeoJSON)
+    std::string crs;                  // Coordinate reference system (e.g., "EPSG:32633")
     
-    RoadSegmentationWriterConfig() : reproject_to_epsg4326(false) {}
+    RoadSegmentationWriterConfig() = default;
 };
 
 /**
- * Road segmentation output writer using GDAL
+ * Road segmentation output writer using GeoJSON
  * This class provides flexible output writing for road segmentation results
- * and is designed to be compatible with both GDAL and GDAL3.js
+ * using the GeoJSON format
  */
 class RoadSegmentationWriter {
 public:
-    RoadSegmentationWriter();
-    ~RoadSegmentationWriter();
+    RoadSegmentationWriter() = default;
+    ~RoadSegmentationWriter() = default;
     
     // Disable copy constructor and assignment
     RoadSegmentationWriter(const RoadSegmentationWriter&) = delete;
@@ -58,30 +56,14 @@ public:
 private:
     std::string last_error_;  // Last error message
     
-    // Removed determineFormatFromExtension - now using GDALUtils::determineFormatFromExtension
-    
     /**
-     * Create GDAL dataset for writing
-     * @param config Writer configuration
-     * @param coord_trans Output parameter for coordinate transformation (can be nullptr)
-     * @param output_file_path Output parameter for the actual file path used (can be modified for format fallback)
-     * @return GDAL dataset pointer (caller owns the pointer)
-     */
-    void* createGDALDataset(const RoadSegmentationWriterConfig& config, OGRCoordinateTransformation*& coord_trans, std::string& output_file_path);
-    
-    /**
-     * Write a single road segment feature
-     * @param dataset GDAL dataset
-     * @param layer GDAL layer
-     * @param coord_trans Coordinate transformation (can be nullptr)
+     * Convert a road segmentation result to GeoJSON feature
      * @param result Road segmentation result
      * @param feature_id Feature ID
-     * @return true if successful, false otherwise
+     * @return GeoJSON feature
      */
-    bool writeFeature(void* dataset, void* layer, 
-                     OGRCoordinateTransformation* coord_trans,
-                     const graph::RoadSplitByDistanceBracketsOutput& result, 
-                     size_t feature_id);
+    graph::GeospatialFeature resultToGeoJSONFeature(const graph::RoadSplitByDistanceBracketsOutput& result, 
+                                                   size_t feature_id);
 };
 
 } // namespace io

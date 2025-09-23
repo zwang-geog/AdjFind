@@ -3,9 +3,8 @@
 
 #include <string>
 #include <vector>
-#include <ogrsf_frmts.h>
 #include "graph/common.hpp"
-#include "io/gdal_utils.hpp"
+#include "io/geojson_writer.hpp"
 
 namespace adjfind {
 namespace graph {
@@ -18,22 +17,22 @@ namespace io {
  * Configuration for neighboring points output writer
  */
 struct NeighboringPointsWriterConfig {
-    std::string output_file_path;     // Output file path with extension
-    std::string crs_wkt;              // Coordinate reference system WKT (optional)
-    bool reproject_to_epsg4326;       // Whether to reproject output to EPSG:4326
+    std::string linestring_output_file_path;  // Output file path for linestring features (GeoJSON)
+    std::string point_output_file_path;       // Output file path for point features (GeoJSON)
+    std::string crs;                          // Coordinate reference system (e.g., "EPSG:32633")
     
-    NeighboringPointsWriterConfig() : reproject_to_epsg4326(false) {}
+    NeighboringPointsWriterConfig() = default;
 };
 
 /**
- * Neighboring points output writer using GDAL
+ * Neighboring points output writer using GeoJSON
  * This class provides flexible output writing for neighboring points results
- * and is designed to be compatible with both GDAL and GDAL3.js
+ * using the GeoJSON format
  */
 class NeighboringPointsWriter {
 public:
-    NeighboringPointsWriter();
-    ~NeighboringPointsWriter();
+    NeighboringPointsWriter() = default;
+    ~NeighboringPointsWriter() = default;
     
     // Disable copy constructor and assignment
     NeighboringPointsWriter(const NeighboringPointsWriter&) = delete;
@@ -61,66 +60,29 @@ public:
      */
     void clearError() { last_error_.clear(); }
     
-    /**
-     * Generate the snapped points output file path
-     * @param base_file_path Base file path
-     * @return File path with "_snapped_points" inserted before extension
-     */
-    std::string generateSnappedPointsFilePath(const std::string& base_file_path) const;
-    
 private:
     std::string last_error_;  // Last error message
     
     /**
-     * Create GDAL dataset for writing linestring features
-     * @param config Writer configuration
-     * @param coord_trans Output parameter for coordinate transformation (can be nullptr)
-     * @param output_file_path Output parameter for the actual file path used (can be modified for format fallback)
-     * @return GDAL dataset pointer (caller owns the pointer)
-     */
-    void* createLinestringDataset(const NeighboringPointsWriterConfig& config, OGRCoordinateTransformation*& coord_trans, std::string& output_file_path);
-    
-    /**
-     * Create GDAL dataset for writing point features
-     * @param config Writer configuration
-     * @param coord_trans Output parameter for coordinate transformation (can be nullptr)
-     * @param output_file_path Output parameter for the actual file path used (can be modified for format fallback)
-     * @return GDAL dataset pointer (caller owns the pointer)
-     */
-    void* createPointDataset(const NeighboringPointsWriterConfig& config, OGRCoordinateTransformation*& coord_trans, std::string& output_file_path);
-    
-    /**
-     * Write both linestring and point features efficiently in a single pass
-     * @param linestring_dataset GDAL dataset for linestrings
-     * @param linestring_layer GDAL layer for linestrings
-     * @param coord_trans_linestring Coordinate transformation for linestrings (can be nullptr)
-     * @param point_dataset GDAL dataset for points
-     * @param point_layer GDAL layer for points
-     * @param coord_trans_point Coordinate transformation for points (can be nullptr)
+     * Convert neighboring points results to GeoJSON linestring features
      * @param neighboring_points_results Map of vertex pairs to shortest paths
      * @param neighboring_points_instance Reference to NeighboringPoints instance for vertex lookup
-     * @return true if successful, false otherwise
+     * @return Vector of GeoJSON linestring features
      */
-    bool writeLinestringAndPointFeatures(void* linestring_dataset, void* linestring_layer, 
-                                        OGRCoordinateTransformation* coord_trans_linestring,
-                                        void* point_dataset, void* point_layer, 
-                                        OGRCoordinateTransformation* coord_trans_point,
-                                        const std::unordered_map<std::pair<size_t, size_t>, std::tuple<size_t, double, graph::MultiLineString>, graph::PairHash>& neighboring_points_results,
-                                        const graph::NeighboringPoints& neighboring_points_instance);
+    std::vector<graph::GeospatialFeature> neighboringPointsResultsToLinestringFeatures(
+        const std::unordered_map<std::pair<size_t, size_t>, std::tuple<size_t, double, graph::MultiLineString>, graph::PairHash>& neighboring_points_results,
+        const graph::NeighboringPoints& neighboring_points_instance);
     
     /**
-     * Compute summary statistics for a point vertex
-     * @param source_vertex_index Source vertex index
+     * Convert neighboring points results to GeoJSON point features
      * @param neighboring_points_results Map of vertex pairs to shortest paths
-     * @param neighboring_points_instance Reference to NeighboringPoints instance
-     * @return Tuple containing (count, min_distance, max_distance, avg_distance)
+     * @param neighboring_points_instance Reference to NeighboringPoints instance for vertex lookup
+     * @return Vector of GeoJSON point features
      */
-    std::tuple<size_t, double, double, double> computePointStatistics(
-        size_t source_vertex_index,
+    std::vector<graph::GeospatialFeature> neighboringPointsResultsToPointFeatures(
         const std::unordered_map<std::pair<size_t, size_t>, std::tuple<size_t, double, graph::MultiLineString>, graph::PairHash>& neighboring_points_results,
-        const graph::NeighboringPoints& neighboring_points_instance) const;
-
-private:
+        const graph::NeighboringPoints& neighboring_points_instance);
+    
     /**
      * Update statistics for a vertex when processing a path
      * @param vertex_index Vertex index to update

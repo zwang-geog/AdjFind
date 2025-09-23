@@ -184,22 +184,44 @@ bool AdjGraph::readAndSnapPointToRoad(const io::RoadReaderConfig& road_config, c
     }
     
     // Check coordinate system compatibility
-    int road_epsg = road_reader.getCoordinateSystemEPSG();
-    int point_epsg = point_reader.getCoordinateSystemEPSG();
+    std::string road_crs = road_reader.getCoordinateSystemCRS();
+    std::string point_crs = point_reader.getCoordinateSystemCRS();
     
-    if (road_epsg != point_epsg) {
+    // Function to normalize CRS strings for comparison
+    auto normalizeCRS = [](const std::string& crs) -> std::string {
+        std::string normalized = crs;
+        
+        // Convert to uppercase
+        std::transform(normalized.begin(), normalized.end(), normalized.begin(), ::toupper);
+        
+        // Replace "URN:OGC:DEF:CRS" with empty string
+        size_t pos = normalized.find("URN:OGC:DEF:CRS:");
+        if (pos != std::string::npos) {
+            normalized.erase(pos, 16); // Remove "URN:OGC:DEF:CRS:"
+        }
+        
+        // Replace "::" with ":"
+        pos = 0;
+        while ((pos = normalized.find("::", pos)) != std::string::npos) {
+            normalized.replace(pos, 2, ":");
+            pos += 1;
+        }
+        
+        return normalized;
+    };
+    
+    if (normalizeCRS(road_crs) != normalizeCRS(point_crs)) {
         std::cerr << "ERROR: Coordinate system mismatch!" << std::endl;
-        std::cerr << "  Road dataset: EPSG:" << road_epsg << std::endl;
-        std::cerr << "  Point dataset: EPSG:" << point_epsg << std::endl;
+        std::cerr << "  Road dataset: " << road_crs << std::endl;
+        std::cerr << "  Point dataset: " << point_crs << std::endl;
         std::cerr << "  Both datasets must have the same coordinate system." << std::endl;
         return false;
     }
     
-    std::cout << "  Coordinate systems match: EPSG:" << road_epsg << std::endl;
+    std::cout << "  Coordinate systems match: " << road_crs << std::endl;
     
     // Store coordinate system information from road reader
-    coordinate_system_wkt_ = road_reader.getCoordinateSystemWKT();
-    coordinate_system_epsg_ = road_reader.getCoordinateSystemEPSG();
+    coordinate_system_crs_ = road_reader.getCoordinateSystemCRS();
     
     std::cout << "  Read " << road_reader.getFeatureCount() << " roads and " 
               << point_reader.getFeatureCount() << " points" << std::endl;
@@ -367,6 +389,12 @@ void AdjGraph::buildEdgeRTree() {
     
     // Iterate through all edges
     for (const auto& edge : edges_) {
+        // Check if edge's endpoint_vertex_to_nearest_point is max (disconnected edge)
+        if (edge.endpoint_vertex_to_nearest_point == std::numeric_limits<size_t>::max()) {
+            std::cout << "WARNING: Skipping edge " << edge.feature_id << " because endpoint_vertex_to_nearest_point is not set" << std::endl;
+            continue;
+        }
+        
         const auto& geometry = edge.geometry;
         
         // Skip edges with insufficient points

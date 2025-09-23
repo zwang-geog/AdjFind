@@ -14,7 +14,7 @@ namespace graph {
 namespace bg = boost::geometry;
 
 ConvexPath::ConvexPath()
-    : building_dataset_initialized_(false), include_network_distance_(false), next_convex_path_vertex_id_(0) {
+    : building_dataset_initialized_(false), include_network_distance_(false), next_convex_path_vertex_id_(0), polygon_split_next_vertex_id_(0) {
 }
 
 bool ConvexPath::processConvexPathMode(const io::RoadReaderConfig& road_config, 
@@ -49,17 +49,36 @@ bool ConvexPath::processConvexPathMode(const io::RoadReaderConfig& road_config,
     }
     
     // Coordinate system validation
-    int road_epsg = getCoordinateSystemEPSG();
-    int building_epsg = building_reader_->getCoordinateSystemEPSG();
+    std::string road_crs = getCoordinateSystemCRS();
+    std::string building_crs = building_reader_->getCoordinateSystemCRS();
 
-    if (road_epsg != building_epsg) {
-        std::cerr << "Warning: Coordinate system mismatch detected!" << std::endl;
-        std::cerr << "Road and point dataset: EPSG:" << road_epsg << std::endl;
-        std::cerr << "Building dataset: EPSG:" << building_epsg << std::endl;
+    // Function to normalize CRS strings for comparison
+    auto normalizeCRS = [](const std::string& crs) -> std::string {
+        std::string normalized = crs;
         
-        // Log WKT information for detailed debugging
-        std::cout << "Road and point dataset WKT: " << getCoordinateSystemWKT() << std::endl;
-        std::cout << "Building dataset WKT: " << building_reader_->getCoordinateSystemWKT() << std::endl;
+        // Convert to uppercase
+        std::transform(normalized.begin(), normalized.end(), normalized.begin(), ::toupper);
+        
+        // Replace "URN:OGC:DEF:CRS" with empty string
+        size_t pos = normalized.find("URN:OGC:DEF:CRS:");
+        if (pos != std::string::npos) {
+            normalized.erase(pos, 16); // Remove "URN:OGC:DEF:CRS:"
+        }
+        
+        // Replace "::" with ":"
+        pos = 0;
+        while ((pos = normalized.find("::", pos)) != std::string::npos) {
+            normalized.replace(pos, 2, ":");
+            pos += 1;
+        }
+        
+        return normalized;
+    };
+
+    if (normalizeCRS(road_crs) != normalizeCRS(building_crs)) {
+        std::cerr << "Warning: Coordinate system mismatch detected!" << std::endl;
+        std::cerr << "Road and point dataset: " << road_crs << std::endl;
+        std::cerr << "Building dataset: " << building_crs << std::endl;
         return false;
     } 
     
@@ -167,8 +186,20 @@ void ConvexPath::clear() {
     convex_path_vertex_rtree_.clear();
     next_convex_path_vertex_id_ = 0;
     
+    // Clear polygon split graph data structures
+    clearPolygonSplitGraph();
+    
     // Clear polygon processing results
     polygon_results_.clear();
+}
+
+void ConvexPath::clearPolygonSplitGraph() {
+    // Clear all polygon split graph data structures
+    polygon_split_vertices_.clear();
+    polygon_split_edges_.clear();
+    added_polygon_split_edges_.clear();
+    polygon_split_vertex_rtree_.clear();
+    polygon_split_next_vertex_id_ = 0;
 }
 
 size_t ConvexPath::findOrCreateConvexPathGraphVertex(const Point& point) {
@@ -177,7 +208,7 @@ size_t ConvexPath::findOrCreateConvexPathGraphVertex(const Point& point) {
     convex_path_vertex_rtree_.query(
         bgi::nearest(point, 1) && 
         bgi::satisfies([&](const std::pair<Point, size_t>& v) {
-            return bg::distance(point, v.first) <= 1e-9;
+            return bg::distance(point, v.first) <= 1e-7;
         }),
         std::back_inserter(candidates)
     );
@@ -199,7 +230,7 @@ std::optional<size_t> ConvexPath::findConvexPathGraphVertexForPoint(const Point&
     convex_path_vertex_rtree_.query(
         bgi::nearest(point, 1) && 
         bgi::satisfies([&](const std::pair<Point, size_t>& v) {
-            return bg::distance(point, v.first) <= 1e-9;
+            return bg::distance(point, v.first) <= 1e-7;
         }),
         std::back_inserter(candidates)
     );
@@ -209,6 +240,28 @@ std::optional<size_t> ConvexPath::findConvexPathGraphVertexForPoint(const Point&
     }
     
     return std::nullopt;
+}
+
+size_t ConvexPath::findOrCreatePolygonSplitGraphVertex(const Point& point, bool is_boundary_vertex) {
+    // Query R-tree for nearby vertices using distance-based tolerance
+    std::vector<std::pair<Point, size_t>> candidates;
+    polygon_split_vertex_rtree_.query(
+        bgi::nearest(point, 1) && 
+        bgi::satisfies([&](const std::pair<Point, size_t>& v) {
+            return bg::distance(point, v.first) <= 1e-7;
+        }),
+        std::back_inserter(candidates)
+    );
+    
+    if (!candidates.empty()) {
+        return candidates[0].second;  // Return existing vertex ID
+    }
+    
+    // Create new vertex
+    size_t vertex_id = polygon_split_next_vertex_id_++;
+    polygon_split_vertices_.emplace_back(point, vertex_id, is_boundary_vertex);
+    polygon_split_vertex_rtree_.insert(std::make_pair(point, vertex_id));
+    return vertex_id;
 }
 
 void ConvexPath::addSegmentToConvexPathGraph(const Point& start_point, const Point& end_point) {
@@ -280,6 +333,49 @@ void ConvexPath::addSegmentToConvexPathGraph(size_t from_vertex, size_t to_verte
     // Add bidirectional edges
     convex_path_edges_.emplace_back(from_vertex, to_vertex, weight);
     convex_path_edges_.emplace_back(to_vertex, from_vertex, weight);
+}
+
+void ConvexPath::addSegmentToSplitPolygonGraph(const Point& start_point, const Point& end_point, bool is_boundary_edge) {
+    // Skip zero-length segments
+    if (bg::equals(start_point, end_point)) {
+        return;
+    }
+    
+    size_t from_vertex = findOrCreatePolygonSplitGraphVertex(start_point, is_boundary_edge);
+    size_t to_vertex = findOrCreatePolygonSplitGraphVertex(end_point, is_boundary_edge);
+    
+    if (from_vertex != to_vertex) {  // Additional check to avoid self-loops
+        // Check if this edge pair already exists
+        PolygonSplitEdgePair edge_pair(from_vertex, to_vertex);
+        if (added_polygon_split_edges_.find(edge_pair) != added_polygon_split_edges_.end()) {
+            // Edge already exists, skip adding
+            return;
+        }
+        
+        // Mark this edge pair as added
+        added_polygon_split_edges_.insert(edge_pair);
+        
+        // Add bidirectional edges
+        polygon_split_edges_.emplace_back(from_vertex, to_vertex, is_boundary_edge);
+        polygon_split_edges_.emplace_back(to_vertex, from_vertex, is_boundary_edge);
+    }
+}
+
+std::vector<size_t> ConvexPath::getPolygonSplitBoundaryVertices() const {
+    std::vector<size_t> boundary_vertices;
+    for (const auto& vertex : polygon_split_vertices_) {
+        if (vertex.is_boundary_vertex) {
+            boundary_vertices.push_back(vertex.vertex_id);
+        }
+    }
+    return boundary_vertices;
+}
+
+std::optional<Point> ConvexPath::getPolygonSplitVertexLocation(size_t vertex_id) const {
+    if (vertex_id < polygon_split_vertices_.size()) {
+        return polygon_split_vertices_[vertex_id].location;
+    }
+    return std::nullopt;
 }
 
 ConvexPathResult ConvexPath::computeShortestPathOnConvexPathGraph(size_t start_vertex_id, size_t end_vertex_id) {
@@ -423,7 +519,10 @@ ConvexPathResult ConvexPath::computeShortestPathOnConvexPathGraph(size_t start_v
     return ConvexPathResult(path_geometry, path_edges, total_length, objective_distance, nearest_point_vertex_position_index, edge_index);
 }
 
-std::vector<std::vector<Point>> ConvexPath::splitPolygon(const PolygonFeature& polygon_feature, const LineString& splitting_line) const {
+std::vector<std::vector<Point>> ConvexPath::splitPolygon(const PolygonFeature& polygon_feature, const LineString& splitting_line) {
+    // Clear polygon split graph data structures to ensure clean state
+    clearPolygonSplitGraph();
+    
     // Logging polygon coordinates and splitting line coordinates with 9 decimal places
     // std::cout << "Splitting line coordinates: ";
     // for (const auto& point : splitting_line) {
@@ -432,7 +531,7 @@ std::vector<std::vector<Point>> ConvexPath::splitPolygon(const PolygonFeature& p
     // std::cout << std::endl;
     
     try {
-        // Step 1: Get intersection points and construct proper intersection linestrings
+//# Step 1: Get intersection points (they are typically ordered along the polygon exterior ring)
         std::vector<Point> intersection_points;
         bg::intersection(splitting_line, polygon_feature.geometry, intersection_points);
         
@@ -449,7 +548,7 @@ std::vector<std::vector<Point>> ConvexPath::splitPolygon(const PolygonFeature& p
             return {};  // Return empty vector
         }
         
-        // Step 2: Sort intersection points by their projection parameter t along the splitting line
+//# Step 2: Sort intersection points by their projection parameter t along the splitting line
         // while preserving the first element
         std::vector<std::tuple<size_t, Point, double>> points_with_t;
         points_with_t.reserve(intersection_points.size());
@@ -497,267 +596,229 @@ std::vector<std::vector<Point>> ConvexPath::splitPolygon(const PolygonFeature& p
         //              << bg::get<0>(point) << ", " << bg::get<1>(point) 
         //              << ") t=" << t << " (original index: " << original_index << ")" << std::endl;
         // }
-        
-        // Step 3: Construct intersection linestrings using hybrid connectivity
+
+//# Step 3: Make linestrings between consecutive intersection points if they interior intersect with the polygon
+    
         std::vector<LineString> intersection_linestrings;
-        
-        // Construct linestrings based on connectivity rules
         for (size_t i = 0; i < points_with_t.size() - 1; ++i) {
             size_t current_sorted_idx = i;
             size_t next_sorted_idx = i + 1;
-            
-            size_t current_original_idx = std::get<0>(points_with_t[current_sorted_idx]);
-            size_t next_original_idx = std::get<0>(points_with_t[next_sorted_idx]);
-            
-            // Check if these points are consecutive in the original array
-            bool are_consecutive_in_original = (next_original_idx == current_original_idx + 1) || 
-                                             (current_original_idx == intersection_points.size() - 1 && next_original_idx == 0);
-            
-            LineString linestring;
-            if (are_consecutive_in_original) {
-                // Use original position indices (maintain original connectivity)
-                linestring.push_back(intersection_points[current_original_idx]);
-                linestring.push_back(intersection_points[next_original_idx]);
-                // std::cout << "  Using original connectivity: " << current_original_idx << " -> " << next_original_idx << std::endl;
-            } else {
-                // Use sorted position indices but swap them (reverse the direction)
-                linestring.push_back(std::get<1>(points_with_t[next_sorted_idx]));
-                linestring.push_back(std::get<1>(points_with_t[current_sorted_idx]));
-                // std::cout << "  Using sorted connectivity (swapped): " << next_sorted_idx << " -> " << current_sorted_idx << std::endl;
-            }
+
+            Point current_point = std::get<1>(points_with_t[current_sorted_idx]);
+            Point next_point = std::get<1>(points_with_t[next_sorted_idx]);
+
+            LineString segment;
+            segment.push_back(current_point);
+            segment.push_back(next_point);
             
             // Check if this linestring crosses or is within the polygon
             bool is_valid_intersection = false;
             if (polygon_feature.shrink_geometry.has_value()) {
                 const Polygon& shrunk_polygon = *polygon_feature.shrink_geometry;
-                is_valid_intersection = bg::crosses(linestring, shrunk_polygon);
+                is_valid_intersection = bg::crosses(segment, shrunk_polygon);
             } else {
                 // Fallback to original geometry if no shrunk geometry available
-                is_valid_intersection = bg::crosses(linestring, polygon_feature.geometry) || bg::within(linestring, polygon_feature.geometry);
+                is_valid_intersection = bg::crosses(segment, polygon_feature.geometry) || bg::within(segment, polygon_feature.geometry);
             }
-            
+
             if (is_valid_intersection) {
-                intersection_linestrings.push_back(linestring);
+                intersection_linestrings.push_back(segment);
                 // std::cout << "  Valid intersection linestring " << intersection_linestrings.size() - 1 << ": ";
-                // for (const auto& point : linestring) {
+                // for (const auto& point : segment) {
                 //     std::cout << "(" << std::fixed << std::setprecision(9) 
                 //              << bg::get<0>(point) << ", " << bg::get<1>(point) << ") ";
                 // }
                 // std::cout << std::endl;
             }
         }
-        
-        if (intersection_linestrings.empty()) {
-            std::cerr << "Warning: No valid intersection linestrings found" << std::endl;
-            return {};  // Return empty vector
-        }
-        
-        // Track which intersection linestrings have been examined
-        std::unordered_map<size_t, bool> is_intersection_linestring_examined;
-        
-        // Step 2: Collect intersection information using the new structure
-        std::vector<PolygonSplittingIntersectionInfo> intersection_infos;
-        
-        // Extract the outer ring of the polygon
-        const auto& outer_ring = bg::exterior_ring(polygon_feature.geometry);
-        std::vector<Point> polygon_points(outer_ring.begin(), outer_ring.end());
-        
-        // Remove duplicate closing point if present
-        if (polygon_points.size() > 1 && 
-            bg::get<0>(polygon_points.front()) == bg::get<0>(polygon_points.back()) &&
-            bg::get<1>(polygon_points.front()) == bg::get<1>(polygon_points.back())) {
-            polygon_points.pop_back();
-        }
 
-        size_t polygon_segment_index = std::get<0>(points_with_t[0]); // the original position index of the first element in the sorted vector
-        bool iterating_polygon_segment = true;
-        std::unordered_set<size_t> visited_polygon_segments;
-        while (iterating_polygon_segment) {
-            Point current = polygon_points[polygon_segment_index];
-            size_t next_polygon_segment_index = (polygon_segment_index + 1) % polygon_points.size();
-            if (visited_polygon_segments.find(polygon_segment_index) != visited_polygon_segments.end()) {
-                polygon_segment_index = next_polygon_segment_index;
-                continue;
-            }
-            visited_polygon_segments.insert(polygon_segment_index);
-            Point next = polygon_points[next_polygon_segment_index];
-            Segment edge(current, next);
-            // std::cout << "  Edge " << polygon_segment_index << ": (" << std::fixed << std::setprecision(9) 
-            //           << bg::get<0>(current) << ", " << bg::get<1>(current) << ") -> (" << bg::get<0>(next) << ", " << bg::get<1>(next) << ")" << std::endl;
-            for (size_t j = 0; j < intersection_linestrings.size(); ++j) {
-                if (!is_intersection_linestring_examined[j]) {
-                    Point start_intersection_point = intersection_linestrings[j][0];
-                    Point end_intersection_point = intersection_linestrings[j][intersection_linestrings[j].size() - 1];
-                    if (bg::distance(start_intersection_point, edge) < 1e-7) {
-                        // std::cout << "  Intersection linestring " << j << " crosses edge " << polygon_segment_index << std::endl;
-                        size_t from_crossed_edge_index = polygon_segment_index;
-                        polygon_segment_index = next_polygon_segment_index;
-                        while (polygon_segment_index != from_crossed_edge_index) {
-                            next_polygon_segment_index = (polygon_segment_index + 1) % polygon_points.size();
-                            Point current = polygon_points[polygon_segment_index];
-                            Point next = polygon_points[next_polygon_segment_index];
-                            Segment to_edge(current, next);
-                            if (bg::distance(end_intersection_point, to_edge) < 1e-7) {
-                                intersection_infos.emplace_back(start_intersection_point, end_intersection_point, from_crossed_edge_index, polygon_segment_index);
-                                is_intersection_linestring_examined[j] = true;
-                                polygon_segment_index = next_polygon_segment_index;
-                                break;
-                            }
-                            polygon_segment_index = next_polygon_segment_index;
+//# Step 4: Determine where endpoints of intersection line segments should be snapped to on the polygon boundary edges, and add graph edges accordingly
+        
+        // 1. Initialize a bool array with length equals to the length of polygon_feature.outer_ring, all values initialized to false
+        std::vector<bool> boundary_segment_split(polygon_feature.outer_ring.size(), false);
+        
+        // 2. Construct a 3-level nested loop
+        // Outer-most loop: iterate through intersection_linestrings
+        for (const auto& intersection_linestring : intersection_linestrings) {
+            // Middle loop: iterate through the first and the second point of the linestring
+            for (size_t endpoint_idx = 0; endpoint_idx < 2; ++endpoint_idx) {
+                Point intersection_endpoint = intersection_linestring[endpoint_idx];
+                
+                // Inner-most loop: iterate through polygon_feature.outer_ring by index
+                for (size_t boundary_idx = 0; boundary_idx < polygon_feature.outer_ring.size(); ++boundary_idx) {
+                    // Skip if the bool array of corresponding index is true
+                    if (boundary_segment_split[boundary_idx]) {
+                        continue;
+                    }
+                    
+                    // Get segment_start and segment_end point for each boundary segment
+                    Point segment_start = polygon_feature.outer_ring[boundary_idx];
+                    Point segment_end = polygon_feature.outer_ring[(boundary_idx + 1) % polygon_feature.outer_ring.size()];
+                    
+                    // 3. If the intersection linestring endpoint has bg::distance to the segment within 1e-7
+                    bg::model::segment<Point> boundary_segment(segment_start, segment_end);
+                    double distance_to_segment = bg::distance(intersection_endpoint, boundary_segment);
+                    
+                    if (distance_to_segment <= 1e-7) {
+                        // (1) Check if the intersection linestring endpoint is within 1e-7 from segment_start or segment_end point
+                        double dist_to_start = bg::distance(intersection_endpoint, segment_start);
+                        double dist_to_end = bg::distance(intersection_endpoint, segment_end);
+                        
+                        if (dist_to_start <= 1e-7 || dist_to_end <= 1e-7) {
+                            // No need to split polygon boundary edge, continue
+                            continue;
                         }
+                        
+                        // (2) Otherwise, add segments and mark as split
+                        // First, ensure intersection_endpoint is created as a vertex with is_boundary_vertex = false
+                        findOrCreatePolygonSplitGraphVertex(intersection_endpoint, false);
+                        
+                        // Add segment for segment_start -> intersection linestring endpoint
+                        addSegmentToSplitPolygonGraph(segment_start, intersection_endpoint, true);
+                        
+                        // Add segment for intersection linestring endpoint -> segment_end
+                        addSegmentToSplitPolygonGraph(intersection_endpoint, segment_end, true);
+                        
+                        // Mark the corresponding element in bool array to true
+                        boundary_segment_split[boundary_idx] = true;
                     }
                 }
             }
-
-            // Update polygon_segment_index to the next segment
-            polygon_segment_index = next_polygon_segment_index;
-
-            // Check if all intersection linestrings have been examined
-            // If all elements in is_intersection_linestring_examined are true, break the loop
-            if (std::all_of(is_intersection_linestring_examined.begin(), is_intersection_linestring_examined.end(), [](const auto& pair) { return pair.second; })) {
-                iterating_polygon_segment = false;
-            }
-            else if (visited_polygon_segments.size() >= polygon_points.size()) {
-                iterating_polygon_segment = false;
-            }
+            
+            // 4. For a intersection linestring, once both its endpoints are examined, add the intersection linestring as a graph edge with is_boundary_edge set to false
+            addSegmentToSplitPolygonGraph(intersection_linestring[0], intersection_linestring[1], false);
         }
         
-        if (intersection_infos.empty()) {
-            return {};  // Return empty vector
+        // 5. Once the 3-level nested loop is done, loop through polygon_feature.outer_ring, and if the corresponding bool array element is false, add the segment as graph edge
+        for (size_t boundary_idx = 0; boundary_idx < polygon_feature.outer_ring.size(); ++boundary_idx) {
+            if (!boundary_segment_split[boundary_idx]) {
+                Point segment_start = polygon_feature.outer_ring[boundary_idx];
+                Point segment_end = polygon_feature.outer_ring[(boundary_idx + 1) % polygon_feature.outer_ring.size()];
+                addSegmentToSplitPolygonGraph(segment_start, segment_end, true);
+            }
+        }
+
+//# Step 5: Graph traversal algorithm
+        
+        // 1. Initialize data structures
+        std::unordered_set<size_t> used_boundary_vertices;
+        std::vector<std::vector<Point>> split_polygon_results;
+        
+        // Build adjacency list from polygon_split_edges_
+        std::unordered_map<size_t, std::vector<size_t>> adjacency_list;
+        for (const auto& edge : polygon_split_edges_) {
+            adjacency_list[edge.from_vertex].push_back(edge.to_vertex);
         }
         
-        // Step 3: Build new polygon ring with inserted intersection points
-        std::vector<Point> modified_ring;
-        
-        for (size_t i = 0; i < polygon_points.size(); ++i) {
-            modified_ring.push_back(polygon_points[i]);
-
-            int intersection_info_index = 0;
-            for (const auto& info : intersection_infos) {
-                if (info.from_crossed_edge_index == i) {
-                    modified_ring.push_back(info.from_point);
-                    intersection_infos[intersection_info_index].from_inserted_position = modified_ring.size() - 1;
+        // 2. Loop through boundary vertices
+        std::vector<size_t> boundary_vertices = getPolygonSplitBoundaryVertices();
+        for (size_t origin_vertex_id : boundary_vertices) {
+            // Skip if vertex already used
+            if (used_boundary_vertices.find(origin_vertex_id) != used_boundary_vertices.end()) {
+                continue;
+            }
+            
+            // 3. Graph traversal algorithm
+            std::queue<size_t> queue;
+            std::unordered_map<size_t, size_t> predecessor; // precedence vector
+            std::unordered_set<size_t> visited;
+            
+            // Add origin to queue
+            queue.push(origin_vertex_id);
+            visited.insert(origin_vertex_id);
+            predecessor[origin_vertex_id] = origin_vertex_id; // self-reference for origin
+            
+            size_t cycle_end_vertex = std::numeric_limits<size_t>::max(); // Track where cycle is found
+            size_t iteration = 0;
+            
+            while (!queue.empty() && cycle_end_vertex == std::numeric_limits<size_t>::max()) {
+                size_t current_vertex = queue.front();
+                queue.pop();
+                
+                // Get adjacent vertices
+                auto adj_it = adjacency_list.find(current_vertex);
+                if (adj_it == adjacency_list.end()) {
+                    continue;
                 }
-                if (info.to_crossed_edge_index == i) {
-                    modified_ring.push_back(info.to_point);
-                    intersection_infos[intersection_info_index].to_inserted_position = modified_ring.size() - 1;
+                
+                const std::vector<size_t>& adjacent_vertices = adj_it->second;
+                
+                for (size_t next_vertex : adjacent_vertices) {
+                    if (visited.find(next_vertex) != visited.end()) {
+                        // Check if we're back to origin (termination criteria)
+                        if (next_vertex == origin_vertex_id && iteration > 1) {
+                            cycle_end_vertex = current_vertex; // Set where cycle is found
+                            break;
+                        }
+                        continue;
+                    }
+                    
+                    // Special handling for iteration 0 (from origin)
+                    if (current_vertex == origin_vertex_id && iteration == 0) {
+                        // Only add the first adjacent vertex to avoid exploring both directions
+                        queue.push(next_vertex);
+                        visited.insert(next_vertex);
+                        predecessor[next_vertex] = current_vertex;
+                        break; // Only process first adjacent vertex
+                    }
+                    
+                    // Normal traversal for other iterations
+                    if (iteration > 0) {
+                        queue.push(next_vertex);
+                        visited.insert(next_vertex);
+                        predecessor[next_vertex] = current_vertex;
+                    }
                 }
-                intersection_info_index++;
+                
+                iteration++;
+            }
+            
+            // 4. If cycle found, collect polygon boundary
+            if (cycle_end_vertex != std::numeric_limits<size_t>::max()) {
+                std::vector<Point> polygon_boundary;
+                
+                // Collect points by back-tracing from cycle_end_vertex to origin
+                size_t current = cycle_end_vertex;
+                while (current != origin_vertex_id) {
+                    auto location_opt = getPolygonSplitVertexLocation(current);
+                    if (location_opt.has_value()) {
+                        polygon_boundary.push_back(location_opt.value());
+                    }
+                    
+                    // Mark this vertex as used (it's part of the polygon boundary)
+                    used_boundary_vertices.insert(current);
+                    
+                    // Move to predecessor
+                    auto pred_it = predecessor.find(current);
+                    if (pred_it != predecessor.end() && pred_it->second != current) {
+                        current = pred_it->second;
+                    } else {
+                        break;
+                    }
+                }
+                
+                // Add the origin vertex point (appears once, not closed)
+                auto origin_location_opt = getPolygonSplitVertexLocation(origin_vertex_id);
+                if (origin_location_opt.has_value()) {
+                    polygon_boundary.push_back(origin_location_opt.value());
+                }
+                
+                // Mark origin vertex as used
+                used_boundary_vertices.insert(origin_vertex_id);
+                
+                // Add to results
+                if (polygon_boundary.size() >= 2) { 
+                    split_polygon_results.push_back(polygon_boundary);
+                }
             }
         }
         
-        // Step 4: Create split polygons from the modified ring
-        if (modified_ring.size() < 5) {  // Need at least 5 points: 3 original + 2 intersections minimum
-            return {};
-        }
-
-        // Debug logging of all intersection_infos
-        //  for (const auto& info : intersection_infos) {
-        //      std::cout << "  From inserted position: " << info.from_inserted_position << std::endl;
-        //      std::cout << "  To inserted position: " << info.to_inserted_position << std::endl;
-        //      std::cout << "  From crossed edge index: " << info.from_crossed_edge_index << std::endl;
-        //      std::cout << "  To crossed edge index: " << info.to_crossed_edge_index << std::endl;
-        //      std::cout << "  From point: (" << std::fixed << std::setprecision(9) 
-        //               << bg::get<0>(info.from_point) << ", " << bg::get<1>(info.from_point) << ")" << std::endl;
-        //      std::cout << "  To point: (" << std::fixed << std::setprecision(9) 
-        //               << bg::get<0>(info.to_point) << ", " << bg::get<1>(info.to_point) << ")" << std::endl;
-        //  }
-        
-        // Create graph-based polygon splitting
-        std::vector<std::vector<Point>> split_results = createPolylinesFromSplitRing(modified_ring, intersection_infos);
-        
-        return split_results;
+        return split_polygon_results;
         
     } catch (const std::exception& e) {
         std::cerr << "Error during polygon splitting: " << e.what() << std::endl;
         return {};
     }
-}
-
-std::vector<std::vector<Point>> ConvexPath::createPolylinesFromSplitRing(const std::vector<Point>& ring, const std::vector<PolygonSplittingIntersectionInfo>& intersection_infos) const {
-    // Step 1: Create vertices (each point in the ring becomes a vertex)
-    std::vector<Point> vertices = ring;
-    
-    // Step 2: Build adjacency lists for splitting edges (boundary edges are not needed)
-    std::unordered_map<size_t, std::vector<size_t>> splitting_adjacency;
-    std::unordered_set<size_t> intersection_vertices;  // Track which vertices are intersection points
-    for (const auto& info : intersection_infos) {
-        splitting_adjacency[info.from_inserted_position].push_back(info.to_inserted_position);
-        splitting_adjacency[info.to_inserted_position].push_back(info.from_inserted_position);
-        intersection_vertices.insert(info.from_inserted_position);
-        intersection_vertices.insert(info.to_inserted_position);
-    }
-
-    // Step 3: Create polylines using queue-based traversal
-    std::unordered_set<size_t> used_vertices;
-
-    std::vector<std::vector<Point>> return_points;  // Changed to vector of vectors
-    
-    // Loop through all vertices as potential starting points
-    for (size_t start_vertex : intersection_vertices) {
-        
-        // Initialize for this polyline
-        std::queue<size_t> queue;
-        std::vector<Point> current_polygon_points;  // Collect points for current polygon
-        std::unordered_set<size_t> used_intersection_points;
-        
-        queue.push(start_vertex);
-        
-        // Process vertices in the queue
-        while (!queue.empty()) {
-            size_t current = queue.front();
-            queue.pop();
-
-            if (current == start_vertex) {
-                // Use current + 1 as the next boundary neighbor (with wrap-around for last vertex)
-                size_t preferred_neighbor = (current + 1) % vertices.size();
-                if (used_vertices.find(preferred_neighbor) != used_vertices.end()) {
-                    break; // A polyline is already traced on this side of the splitting segment
-                }
-                used_vertices.insert(preferred_neighbor);
-                queue.push(preferred_neighbor);
-                current_polygon_points.push_back(vertices[current]);
-                used_intersection_points.insert(current); // start vertex is always an intersection point
-            }
-            else {
-                // Check splitting adjacency first
-                if (splitting_adjacency.find(current) != splitting_adjacency.end()) {
-                    if (used_intersection_points.find(current) == used_intersection_points.end()) {
-                        const auto& next_vertex = splitting_adjacency[current][0];
-                        // Reached another splitting segment
-                        if (next_vertex != start_vertex) {
-                            queue.push(next_vertex);
-                            current_polygon_points.push_back(vertices[current]);
-                            used_intersection_points.insert(next_vertex);
-                            continue; // No need to add the segment since it is not boundary segment
-                        }
-                        // Reached the connected intersection vertex
-                        else {
-                            current_polygon_points.push_back(vertices[current]);
-                            break;
-                        }
-                    }
-                } 
-                else {
-                    // Not a splitting segment
-                    used_vertices.insert(current);
-                }
-
-                // Check boundary adjacency if no splitting neighbor was added
-                // Use current + 1 as the next boundary neighbor (with wrap-around for last vertex)
-                size_t preferred_neighbor = (current + 1) % vertices.size();
-                queue.push(preferred_neighbor);
-                current_polygon_points.push_back(vertices[current]);
-            }
-        }
-        
-        // Add current polygon segments to return vector if not empty
-        if (!current_polygon_points.empty()) {
-            return_points.push_back(current_polygon_points);
-        }
-    }
-    
-    return return_points;
 }
 
 ConvexHullResult ConvexPath::generateConvexHullSegments(const PolygonFeature& polygon_feature, 

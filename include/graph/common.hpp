@@ -7,11 +7,13 @@
 #include <limits>
 #include <unordered_set>
 #include <optional>
+#include <string>
 #include <boost/geometry.hpp>
 #include <boost/geometry/geometries/point.hpp>
 #include <boost/geometry/geometries/linestring.hpp>
 #include <boost/geometry/geometries/segment.hpp>
 #include <boost/geometry/index/rtree.hpp>
+#include <nlohmann/json.hpp>
 
 namespace adjfind {
 namespace graph {
@@ -19,6 +21,65 @@ namespace graph {
 // Boost Geometry namespace aliases
 namespace bg = boost::geometry;
 namespace bgi = boost::geometry::index;
+
+// GeoJSON Types (moved from core/geojson_types.hpp)
+/**
+ * Represents a single geospatial feature with geometry and properties
+ */
+struct GeospatialFeature {
+    size_t id;
+    nlohmann::json geometry;
+    nlohmann::json properties;
+    
+    GeospatialFeature() = default;
+    
+    GeospatialFeature(size_t feature_id, 
+                     const nlohmann::json& geom, 
+                     const nlohmann::json& props)
+        : id(feature_id), geometry(geom), properties(props) {}
+};
+
+/**
+ * Represents a complete geospatial dataset with CRS information
+ */
+struct GeospatialDataset {
+    std::string crs;  // CRS information for output (e.g., "EPSG:32633")
+    std::vector<GeospatialFeature> features;
+    
+    GeospatialDataset() = default;
+    
+    GeospatialDataset(const std::string& coordinate_system, 
+                     const std::vector<GeospatialFeature>& feature_list)
+        : crs(coordinate_system), features(feature_list) {}
+    
+    /**
+     * Add a feature to the dataset
+     */
+    void addFeature(const GeospatialFeature& feature) {
+        features.push_back(feature);
+    }
+    
+    /**
+     * Get the number of features in the dataset
+     */
+    size_t size() const {
+        return features.size();
+    }
+    
+    /**
+     * Check if the dataset is empty
+     */
+    bool empty() const {
+        return features.empty();
+    }
+    
+    /**
+     * Clear all features from the dataset
+     */
+    void clear() {
+        features.clear();
+    }
+};
 
 // 2D Geometry types (for data reading)
 using Point = bg::model::point<double, 2, bg::cs::cartesian>;
@@ -238,6 +299,54 @@ struct ConvexPathGraphEdge {
 };
 
 /**
+ * Structure representing a vertex in the polygon split graph
+ */
+struct PolygonSplitGraphVertex {
+    Point location;
+    size_t vertex_id;
+    bool is_boundary_vertex;
+    
+    PolygonSplitGraphVertex(const Point& loc, size_t id, bool is_boundary = true) 
+        : location(loc), vertex_id(id), is_boundary_vertex(is_boundary) {}
+};
+
+/**
+ * Structure representing an edge in the polygon split graph
+ */
+struct PolygonSplitGraphEdge {
+    size_t from_vertex;
+    size_t to_vertex;
+    bool is_boundary_edge;
+    
+    PolygonSplitGraphEdge(size_t from, size_t to, bool is_boundary = true) 
+        : from_vertex(from), to_vertex(to), is_boundary_edge(is_boundary) {}
+};
+
+/**
+ * Structure representing a pair of vertices for polygon split edge tracking
+ */
+struct PolygonSplitEdgePair {
+    size_t vertex1;
+    size_t vertex2;
+    
+    PolygonSplitEdgePair(size_t v1, size_t v2) 
+        : vertex1(std::min(v1, v2)), vertex2(std::max(v1, v2)) {}
+    
+    bool operator==(const PolygonSplitEdgePair& other) const {
+        return vertex1 == other.vertex1 && vertex2 == other.vertex2;
+    }
+};
+
+/**
+ * Hash function for PolygonSplitEdgePair
+ */
+struct PolygonSplitEdgePairHash {
+    std::size_t operator()(const PolygonSplitEdgePair& pair) const {
+        return std::hash<size_t>()(pair.vertex1) ^ (std::hash<size_t>()(pair.vertex2) << 1);
+    }
+};
+
+/**
  * Structure representing a pair of vertices for edge tracking
  */
 struct ConvexPathEdgePair {
@@ -305,21 +414,6 @@ struct ConvexPathResult {
 };
 
 /**
- * Structure representing intersection information for polygon splitting
- */
-struct PolygonSplittingIntersectionInfo {
-    Point from_point;                    // First point of the intersection linestring
-    Point to_point;          // Last point of the intersection linestring
-    size_t from_crossed_edge_index;      // Index of the crossed polygon edge corresponding to from_point
-    size_t to_crossed_edge_index;        // Index of the crossed polygon edge corresponding to to_point
-    size_t from_inserted_position;       // Position in the modified ring for from_point
-    size_t to_inserted_position;         // Position in the modified ring for to_point
-    
-    PolygonSplittingIntersectionInfo(const Point& from_pt, const Point& to_pt, size_t from_edge_idx, size_t to_edge_idx, size_t from_inserted_pos = SIZE_MAX, size_t to_inserted_pos = SIZE_MAX)
-        : from_point(from_pt), to_point(to_pt), from_crossed_edge_index(from_edge_idx), to_crossed_edge_index(to_edge_idx), from_inserted_position(from_inserted_pos), to_inserted_position(to_inserted_pos) {}
-};
-
-/**
  * Structure representing a candidate edge with metadata
  * Note: Convexity information is stored in the parent ConvexHullResult structure
  */
@@ -361,6 +455,104 @@ struct IterationState {
         return current_obstacle_count != previous_obstacle_count;
     }
 };
+
+// Geometry Conversion Utilities for GeoJSON
+/**
+ * Convert Boost Geometry Point to GeoJSON Point geometry
+ * @param point Boost Geometry Point
+ * @return GeoJSON Point geometry object
+ */
+nlohmann::json pointToGeoJSON(const Point& point);
+
+/**
+ * Convert Boost Geometry LineString to GeoJSON LineString geometry
+ * @param linestring Boost Geometry LineString
+ * @return GeoJSON LineString geometry object
+ */
+nlohmann::json lineStringToGeoJSON(const LineString& linestring);
+
+/**
+ * Convert Boost Geometry MultiLineString to GeoJSON MultiLineString geometry
+ * @param multiLineString Boost Geometry MultiLineString
+ * @return GeoJSON MultiLineString geometry object
+ */
+nlohmann::json multiLineStringToGeoJSON(const MultiLineString& multiLineString);
+
+/**
+ * Convert Boost Geometry Polygon to GeoJSON Polygon geometry
+ * @param polygon Boost Geometry Polygon
+ * @return GeoJSON Polygon geometry object
+ */
+nlohmann::json polygonToGeoJSON(const Polygon& polygon);
+
+// GeoJSON to Boost Geometry Conversion Utilities
+/**
+ * Convert GeoJSON Point or MultiPoint geometry to Boost Geometry Point
+ * For MultiPoint, uses only the first point and prints a warning if more than one exists
+ * @param geometry GeoJSON geometry object
+ * @return Boost Geometry Point
+ */
+Point geoJSONPointToBoost(const nlohmann::json& geometry);
+
+/**
+ * Convert GeoJSON LineString or MultiLineString geometry to Boost Geometry LineString
+ * For MultiLineString, uses only the first LineString and prints a warning if more than one exists
+ * @param geometry GeoJSON geometry object
+ * @return Boost Geometry LineString
+ */
+LineString geoJSONLineStringToBoost(const nlohmann::json& geometry);
+
+/**
+ * Convert GeoJSON Polygon or MultiPolygon geometry to Boost Geometry Polygon
+ * For MultiPolygon, uses only the first polygon and prints a warning if more than one exists
+ * This matches the behavior of the current GDAL polygon reader
+ * @param geometry GeoJSON geometry object
+ * @return Boost Geometry Polygon
+ */
+Polygon geoJSONPolygonToBoost(const nlohmann::json& geometry);
+
+// GeoJSON Field Value Utilities
+/**
+ * Get field value as size_t from GeoJSON properties
+ * @param properties GeoJSON properties object
+ * @param field_name Field name
+ * @return Field value if exists and can be converted
+ */
+std::optional<size_t> getFieldValueAsSizeT(const nlohmann::json& properties,
+                                          const std::string& field_name);
+
+/**
+ * Get field value as double with default from GeoJSON properties
+ * @param properties GeoJSON properties object
+ * @param field_name Field name
+ * @param default_value Default value
+ * @return Field value or default
+ */
+double getFieldValueAsDouble(const nlohmann::json& properties,
+                           const std::string& field_name,
+                           double default_value);
+
+/**
+ * Get field value as string with default from GeoJSON properties
+ * @param properties GeoJSON properties object
+ * @param field_name Field name
+ * @param default_value Default value
+ * @return Field value or default
+ */
+std::string getFieldValueAsString(const nlohmann::json& properties,
+                                const std::string& field_name,
+                                const std::string& default_value = "");
+
+/**
+ * Get field value as bool with default from GeoJSON properties
+ * @param properties GeoJSON properties object
+ * @param field_name Field name
+ * @param default_value Default value
+ * @return Field value or default
+ */
+bool getFieldValueAsBool(const nlohmann::json& properties,
+                        const std::string& field_name,
+                        bool default_value = false);
 
 } // namespace graph
 } // namespace adjfind

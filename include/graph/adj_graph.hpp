@@ -191,16 +191,10 @@ public:
     bool readAndSnapPointToRoad(const io::RoadReaderConfig& road_config, const io::PointReaderConfig& point_config);
     
     /**
-     * Get coordinate system WKT
-     * @return Coordinate system WKT string
+     * Get coordinate system CRS
+     * @return Coordinate system CRS string (e.g., "EPSG:32633")
      */
-    std::string getCoordinateSystemWKT() const { return coordinate_system_wkt_; }
-    
-    /**
-     * Get coordinate system EPSG code
-     * @return Coordinate system EPSG code
-     */
-    int getCoordinateSystemEPSG() const { return coordinate_system_epsg_; }
+    std::string getCoordinateSystemCRS() const { return coordinate_system_crs_; }
 
     /**
      * Compute the snapped point on an edge
@@ -233,8 +227,7 @@ private:
     size_t next_vertex_id_;
     
     // Coordinate system information
-    std::string coordinate_system_wkt_;
-    int coordinate_system_epsg_;
+    std::string coordinate_system_crs_;
     
     // Spatial tolerance for vertex matching
     static constexpr double ROAD_VERTEX_SNAPPING_TOLERANCE = 1e-2;

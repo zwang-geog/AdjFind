@@ -3,9 +3,8 @@
 
 #include <string>
 #include <vector>
-#include <ogrsf_frmts.h>
 #include "graph/common.hpp"
-#include "io/gdal_utils.hpp"
+#include "io/geojson_writer.hpp"
 
 namespace adjfind {
 namespace io {
@@ -14,22 +13,22 @@ namespace io {
  * Configuration for convex path output writer
  */
 struct ConvexPathWriterConfig {
-    std::string output_file_path;     // Output file path with extension
-    std::string crs_wkt;              // Coordinate reference system WKT (optional)
-    bool reproject_to_epsg4326;       // Whether to reproject output to EPSG:4326
+    std::string linestring_output_file_path;  // Output file path for linestring features (GeoJSON)
+    std::string point_output_file_path;       // Output file path for point features (GeoJSON)
+    std::string crs;                          // Coordinate reference system (e.g., "EPSG:32633")
     
-    ConvexPathWriterConfig() : reproject_to_epsg4326(false) {}
+    ConvexPathWriterConfig() = default;
 };
 
 /**
- * Convex path output writer using GDAL
+ * Convex path output writer using GeoJSON
  * This class provides flexible output writing for convex path results
- * and is designed to be compatible with both GDAL and GDAL3.js
+ * using the GeoJSON format
  */
 class ConvexPathWriter {
 public:
-    ConvexPathWriter();
-    ~ConvexPathWriter();
+    ConvexPathWriter() = default;
+    ~ConvexPathWriter() = default;
     
     // Disable copy constructor and assignment
     ConvexPathWriter(const ConvexPathWriter&) = delete;
@@ -59,58 +58,32 @@ private:
     std::string last_error_;  // Last error message
     
     /**
-     * Create GDAL dataset for writing linestring features
-     * @param config Writer configuration
-     * @param coord_trans Output parameter for coordinate transformation (can be nullptr)
-     * @param output_file_path Output parameter for the actual file path used (can be modified for format fallback)
-     * @return GDAL dataset pointer (caller owns the pointer)
+     * Convert convex path results to GeoJSON linestring features
+     * @param vertex_paths Vector of convex path results
+     * @param polygon_feature_id Polygon feature ID
+     * @param least_accessible_point Least accessible point
+     * @param start_feature_id Starting feature ID
+     * @return Vector of GeoJSON features
      */
-    void* createLinestringDataset(const ConvexPathWriterConfig& config, OGRCoordinateTransformation*& coord_trans, std::string& output_file_path);
+    std::vector<graph::GeospatialFeature> convexPathResultsToLinestringFeatures(
+        const std::vector<graph::ConvexPathResult>& vertex_paths, 
+        size_t polygon_feature_id,
+        const graph::Point& least_accessible_point,
+        size_t start_feature_id);
     
     /**
-     * Create GDAL dataset for writing point features
-     * @param config Writer configuration
-     * @param coord_trans Output parameter for coordinate transformation (can be nullptr)
-     * @param output_file_path Output parameter for the actual file path used (can be modified for format fallback)
-     * @return GDAL dataset pointer (caller owns the pointer)
-     */
-    void* createPointDataset(const ConvexPathWriterConfig& config, OGRCoordinateTransformation*& coord_trans, std::string& output_file_path);
-    
-    /**
-     * Write a single linestring feature
-     * @param dataset GDAL dataset
-     * @param layer GDAL layer
-     * @param coord_trans Coordinate transformation (can be nullptr)
+     * Convert least accessible point to GeoJSON point feature
      * @param vertex_paths Vector of convex path results
      * @param polygon_feature_id Polygon feature ID
      * @param least_accessible_point Least accessible point
      * @param feature_id Feature ID
-     * @return true if successful, false otherwise
+     * @return GeoJSON feature
      */
-    bool writeLinestringFeature(void* dataset, void* layer, 
-                               OGRCoordinateTransformation* coord_trans,
-                               const std::vector<graph::ConvexPathResult>& vertex_paths, 
-                               size_t polygon_feature_id,
-                               const graph::Point& least_accessible_point,
-                               size_t feature_id);
-    
-    /**
-     * Write a single point feature
-     * @param dataset GDAL dataset
-     * @param layer GDAL layer
-     * @param coord_trans Coordinate transformation (can be nullptr)
-     * @param vertex_paths Vector of convex path results
-     * @param polygon_feature_id Polygon feature ID
-     * @param least_accessible_point Least accessible point
-     * @param feature_id Feature ID
-     * @return true if successful, false otherwise
-     */
-    bool writePointFeature(void* dataset, void* layer, 
-                          OGRCoordinateTransformation* coord_trans,
-                          const std::vector<graph::ConvexPathResult>& vertex_paths, 
-                          size_t polygon_feature_id,
-                          const graph::Point& least_accessible_point,
-                          size_t feature_id);
+    graph::GeospatialFeature leastAccessiblePointToGeoJSONFeature(
+        const std::vector<graph::ConvexPathResult>& vertex_paths,
+        size_t polygon_feature_id,
+        const graph::Point& least_accessible_point,
+        size_t feature_id);
     
     /**
      * Convert ConvexPathResultType enum to string

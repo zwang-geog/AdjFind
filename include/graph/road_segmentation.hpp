@@ -22,10 +22,18 @@ public:
      * This method implements the complete road segmentation workflow
      * @param road_config Road reader configuration
      * @param point_config Point reader configuration
-     * @param distance_breakpoints Vector of distance values to split at
+     * @param distance_str Comma-separated string of distance values to split at
      * @return Vector of RoadSplitByDistanceBracketsOutput structures
      */
-    std::vector<RoadSplitByDistanceBracketsOutput> processRoadSegmentationMode(const io::RoadReaderConfig& road_config, const io::PointReaderConfig& point_config, const std::vector<double>& distance_breakpoints);
+    std::vector<RoadSplitByDistanceBracketsOutput> processRoadSegmentationMode(const io::RoadReaderConfig& road_config, const io::PointReaderConfig& point_config, const std::string& distance_str);
+    
+    /**
+     * Parse comma-separated distance string into vector of doubles
+     * @param distance_str Comma-separated string of distance values
+     * @return Vector of parsed distance values
+     * @throws std::invalid_argument if any distance value is non-positive
+     */
+    std::vector<double> parseDistanceVector(const std::string& distance_str);
     
     /**
      * Populate distance to point vertex for all vertices

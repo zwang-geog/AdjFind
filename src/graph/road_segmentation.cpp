@@ -4,13 +4,43 @@
 #include <algorithm>
 #include <queue>
 #include <unordered_map>
+#include <sstream>
+#include <stdexcept>
 
 namespace adjfind {
 namespace graph {
 
 RoadSegmentation::RoadSegmentation() : AdjGraph() {}
 
-std::vector<RoadSplitByDistanceBracketsOutput> RoadSegmentation::processRoadSegmentationMode(const io::RoadReaderConfig& road_config, const io::PointReaderConfig& point_config, const std::vector<double>& distance_breakpoints) {
+std::vector<double> RoadSegmentation::parseDistanceVector(const std::string& distance_str) {
+    std::vector<double> distances;
+    
+    // Handle empty string
+    if (distance_str.empty()) {
+        return distances;
+    }
+    
+    std::stringstream ss(distance_str);
+    std::string token;
+    
+    while (std::getline(ss, token, ',')) {
+        // Trim whitespace
+        token.erase(0, token.find_first_not_of(" \t"));
+        token.erase(token.find_last_not_of(" \t") + 1);
+        
+        if (!token.empty()) {
+            double distance = std::stod(token);
+            if (distance <= 0) {
+                throw std::invalid_argument("Distance values must be positive");
+            }
+            distances.push_back(distance);
+        }
+    }
+    
+    return distances;
+}
+
+std::vector<RoadSplitByDistanceBracketsOutput> RoadSegmentation::processRoadSegmentationMode(const io::RoadReaderConfig& road_config, const io::PointReaderConfig& point_config, const std::string& distance_str) {
     std::cout << "=== Road Segmentation Mode ===" << std::endl;
     
     // Read and snap points to roads (Steps 1-4) - call base class method
@@ -27,7 +57,9 @@ std::vector<RoadSplitByDistanceBracketsOutput> RoadSegmentation::processRoadSegm
     std::cout << "Step 6: Splitting linestrings at equilibrium points..." << std::endl;
     splitLinestringAtEquilibrium();
     
-    // Step 7: Process based on distance breakpoints
+    // Step 7: Parse distance string and process based on distance breakpoints
+    std::vector<double> distance_breakpoints = parseDistanceVector(distance_str);
+    
     if (!distance_breakpoints.empty()) {
         std::cout << "Step 7: Splitting road linestrings by distance breakpoints..." << std::endl;
         return splitRoadLinestringsByDistanceVector(distance_breakpoints);
