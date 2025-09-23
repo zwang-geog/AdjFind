@@ -56,11 +56,15 @@ if [[ "$OSTYPE" == "darwin"* ]]; then
     
     # Use downloaded Boost instead of Homebrew Boost
     echo "Checking for downloaded Boost directory..."
-    if [[ -d "boost" ]]; then
-        echo "Found boost directory, setting Boost_ROOT to: $PWD/boost"
-        CMAKE_PREFIX_ARGS="$CMAKE_PREFIX_ARGS -DBoost_ROOT=$PWD/boost -DBoost_NO_BOOST_CMAKE=ON"
+    # Look for boost in the parent directory (workspace root)
+    BOOST_PATH="../boost"
+    if [[ -d "$BOOST_PATH" ]]; then
+        echo "Found boost directory, setting Boost_ROOT to: $PWD/$BOOST_PATH"
+        CMAKE_PREFIX_ARGS="$CMAKE_PREFIX_ARGS -DBoost_ROOT=$PWD/$BOOST_PATH -DBoost_NO_BOOST_CMAKE=ON"
     else
-        echo "Boost directory not found at: $PWD/boost"
+        echo "Boost directory not found at: $PWD/$BOOST_PATH"
+        echo "Current directory contents:"
+        ls -la ../
     fi
     
     echo "Final CMAKE_PREFIX_ARGS: $CMAKE_PREFIX_ARGS"
