@@ -80,15 +80,36 @@ public:
      * @param splitting_line The line used to split the polygon
      * @return Vector of polylines representing the split result
      */
-    std::vector<std::vector<Point>> splitPolygon(const PolygonFeature& polygon_feature, const LineString& splitting_line) const;
+    std::vector<std::vector<Point>> splitPolygon(const PolygonFeature& polygon_feature, const LineString& splitting_line);
     
-    /**
-     * Create polylines from split ring with intersection information
-     * @param ring The modified ring with intersection points
-     * @param intersection_infos Vector of intersection information
-     * @return Vector of polylines representing the split result
-     */
-    std::vector<std::vector<Point>> createPolylinesFromSplitRing(const std::vector<Point>& ring, const std::vector<PolygonSplittingIntersectionInfo>& intersection_infos) const;
+     /**
+      * Find or create a vertex in the polygon split graph
+      * @param point Location of the vertex
+      * @param is_boundary_vertex Whether this vertex is on the boundary (default: true)
+      * @return Vertex ID
+      */
+     size_t findOrCreatePolygonSplitGraphVertex(const Point& point, bool is_boundary_vertex = true);
+     
+     /**
+      * Add a segment to the polygon split graph
+      * @param start_point Start point of the segment
+      * @param end_point End point of the segment
+      * @param is_boundary_edge Whether this edge is on the boundary (default: true)
+      */
+     void addSegmentToSplitPolygonGraph(const Point& start_point, const Point& end_point, bool is_boundary_edge = true);
+     
+     /**
+      * Get boundary vertices from the polygon split graph
+      * @return Vector of boundary vertex IDs
+      */
+     std::vector<size_t> getPolygonSplitBoundaryVertices() const;
+     
+     /**
+      * Get vertex location by vertex ID from the polygon split graph
+      * @param vertex_id The vertex ID to look up
+      * @return Optional Point location if vertex exists
+      */
+     std::optional<Point> getPolygonSplitVertexLocation(size_t vertex_id) const;
 
     /**
      * Generate convex hull segments for a polygon feature
@@ -212,6 +233,11 @@ private:
      * Clear all convex path graph data structures
      */
     void clear();
+
+    /**
+     * Clear all polygon split graph data structures
+     */
+    void clearPolygonSplitGraph();
     
     // Building dataset reader
     std::unique_ptr<io::PolygonReader> building_reader_;
@@ -231,6 +257,16 @@ private:
     // R-tree for convex path vertices
     using ConvexPathVertexRTree = bgi::rtree<std::pair<Point, size_t>, bgi::quadratic<16>>;
     ConvexPathVertexRTree convex_path_vertex_rtree_;
+
+    // Polygon split graph data structures
+    std::vector<PolygonSplitGraphVertex> polygon_split_vertices_;
+    std::vector<PolygonSplitGraphEdge> polygon_split_edges_;
+    std::unordered_set<PolygonSplitEdgePair, PolygonSplitEdgePairHash> added_polygon_split_edges_;
+    size_t polygon_split_next_vertex_id_;
+    
+    // R-tree for polygon split vertices
+    using PolygonSplitVertexRTree = bgi::rtree<std::pair<Point, size_t>, bgi::quadratic<16>>;
+    PolygonSplitVertexRTree polygon_split_vertex_rtree_;
     
     // Results from polygon processing
     std::vector<std::tuple<std::vector<ConvexPathResult>, size_t, Point>> polygon_results_;

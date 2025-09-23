@@ -367,6 +367,11 @@ void AdjGraph::buildEdgeRTree() {
     
     // Iterate through all edges
     for (const auto& edge : edges_) {
+        // Check if edge's endpoint_vertex_to_nearest_point is max (disconnected edge)
+        if (edge.endpoint_vertex_to_nearest_point == std::numeric_limits<size_t>::max()) {
+            std::cout << "WARNING: Skipping edge " << edge.feature_id << " because endpoint_vertex_to_nearest_point is not set" << std::endl;
+            continue;
+        }
         const auto& geometry = edge.geometry;
         
         // Skip edges with insufficient points

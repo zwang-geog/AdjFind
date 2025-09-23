@@ -38,11 +38,22 @@ done
 mkdir -p "$BUILD_DIR"
 cd "$BUILD_DIR"
 
+# Configure CMAKE_PREFIX_PATH for macOS
+CMAKE_PREFIX_ARGS=""
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    # On macOS, add Homebrew paths for Boost and other dependencies
+    if command -v brew &> /dev/null; then
+        HOMEBREW_PREFIX=$(brew --prefix)
+        CMAKE_PREFIX_ARGS="-DCMAKE_PREFIX_PATH=$HOMEBREW_PREFIX"
+    fi
+fi
+
 # Configure with CMake
 cmake .. \
     -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
     -DCMAKE_INSTALL_PREFIX="$INSTALL_PREFIX" \
-    -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+    -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+    $CMAKE_PREFIX_ARGS
 
 # Build
 cmake --build . --config "$BUILD_TYPE" -j$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 1)

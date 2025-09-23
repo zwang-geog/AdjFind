@@ -126,13 +126,15 @@ In the following figure, the shortest unobstructed paths to the building corner 
 The output has two datasets. The first is a linestring dataset that has exact name as specified in output-file parameter, and it has path geometry of both corner points and least-accessible-point. The path geometry does not include any road network component, and it ends at the road access point. It has following fields:
 - `row_id` - unique identifier of each row
 - `polygon_feature_id` - the path's corresponding building's ID from the input data. Each input polygon feature has multiple rows corresponding to different paths in the output
-- `path_type` - One of "BUILDING_CORNER" or "LEAST_ACCESSIBLE_POINT"
+- `path_type` - One of "BUILDING_CORNER" or "LEAST_ACCESSIBLE_POINT" or "NOT_FOUND" (If no path found, access_distance, assigned_point_feature_id, distance_to_assigned_point, snapped_road_feature_id will be null)
 - `assigned_point_feature_id` - the ID of the point in point dataset that is closest to the road access point of the path
 - `snapped_road_feature_id` - the ID of the road linestring that the road access point is on (the road linestring that the shortest unobstructed path connects to)
 - `distance_to_assigned_point` - the distance from building corner point or least-accessible-point to the point feature with assigned_point_feature_id, and it consists of both network distance and access distance
 - `access-distance` - the distance from building corner point or least-accessible-point to the road access point; it is the length of the output path geometry
 
 The second output dataset is a point dataset with "_least_accessible_point" appended to the end of the specified output file name. It has one row for each input polygon, and it has same fields as the linestring dataset excluding path_type field.
+
+**WARNIHG: If a building overlaps with a road linestring, some of its corner points may not be able to find a path (the least-accessible point identified will thus be incorrect). If a building's corner point's closest point is on the portion of the road linestring that overlaps with another building, it may also not able to find a path. Road-building intersection should be avoided in the input data (building-building overlap is also recommended to be minimized if possible)**
 
 **Required Arguments:**
 - `--road-file-path <path>` - Path to the road network file
