@@ -10,7 +10,55 @@ if(POLICY CMP0167)
 endif()
 
 # Find required packages
-find_package(Boost REQUIRED COMPONENTS system filesystem)
+# Try to find Boost with components first
+find_package(Boost QUIET COMPONENTS system filesystem)
+
+# If Boost with components not found, try without components (header-only)
+if(NOT Boost_FOUND)
+    message(STATUS "Boost with components not found, trying header-only Boost...")
+    find_package(Boost QUIET)
+    
+    # If still not found, try to find Boost in common locations
+    if(NOT Boost_FOUND)
+        message(STATUS "Boost not found via find_package, trying common locations...")
+        
+        # Check common Homebrew locations
+        set(BOOST_PATHS
+            "/opt/homebrew/include"
+            "/usr/local/include"
+            "/opt/homebrew/lib/cmake/Boost-*"
+            "/usr/local/lib/cmake/Boost-*"
+        )
+        
+        foreach(BOOST_PATH ${BOOST_PATHS})
+            if(EXISTS "${BOOST_PATH}")
+                message(STATUS "Found Boost at: ${BOOST_PATH}")
+                set(Boost_INCLUDE_DIRS "${BOOST_PATH}")
+                set(Boost_FOUND TRUE)
+                break()
+            endif()
+        endforeach()
+        
+        # If still not found, create a minimal Boost target
+        if(NOT Boost_FOUND)
+            message(STATUS "Creating minimal Boost target...")
+            add_library(Boost INTERFACE)
+            # Try to find Boost headers in common locations
+            find_path(BOOST_INCLUDE_DIR boost/version.hpp
+                PATHS
+                /opt/homebrew/include
+                /usr/local/include
+                /usr/include
+            )
+            if(BOOST_INCLUDE_DIR)
+                target_include_directories(Boost INTERFACE ${BOOST_INCLUDE_DIR})
+                message(STATUS "Using Boost headers from: ${BOOST_INCLUDE_DIR}")
+            else()
+                message(FATAL_ERROR "Could not find Boost headers")
+            endif()
+        endif()
+    endif()
+endif()
 find_package(GDAL REQUIRED)
 find_package(nlohmann_json REQUIRED)
 

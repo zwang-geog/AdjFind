@@ -35,13 +35,7 @@ jobs:
       
       - name: Install dependencies
         run: |
-          brew install cmake gdal nlohmann-json
-          
-      - name: Download Boost
-        run: |
-          wget https://archives.boost.io/release/1.83.0/source/boost_1_83_0.tar.gz
-          tar -xjf boost_1_83_0.tar.gz
-          mv boost_1_83_0 boost
+          brew install cmake gdal boost nlohmann-json
       
       - name: Build
         run: |
