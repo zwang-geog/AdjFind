@@ -35,19 +35,21 @@ jobs:
       
       - name: Install dependencies
         run: |
-          brew install cmake gdal boost nlohmann-json
-      
-      - name: Verify Boost installation
+          brew install cmake gdal nlohmann-json
+          
+      - name: Install Boost via conda
         run: |
-          echo "=== Boost Installation Verification ==="
-          echo "Homebrew prefix: $(brew --prefix)"
-          echo "Boost version: $(brew list boost --versions)"
-          echo "Boost libraries:"
-          ls -la $(brew --prefix)/lib/libboost*
-          echo "Boost headers:"
-          ls -la $(brew --prefix)/include/boost/
-          echo "Boost CMake files:"
-          ls -la $(brew --prefix)/lib/cmake/Boost-*
+          # Install miniconda
+          curl -L -O "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-MacOSX-arm64.sh"
+          bash Miniforge3-MacOSX-arm64.sh -b -p $HOME/miniforge3
+          source $HOME/miniforge3/bin/activate
+          
+          # Install Boost via conda
+          conda install -c conda-forge boost-cpp -y
+          
+          # Add conda paths to environment
+          echo "CONDA_PREFIX=$HOME/miniforge3" >> $GITHUB_ENV
+          echo "CMAKE_PREFIX_PATH=$HOME/miniforge3" >> $GITHUB_ENV
       
       - name: Build
         run: |
