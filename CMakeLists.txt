@@ -10,9 +10,59 @@ if(POLICY CMP0167)
 endif()
 
 # Find required packages
-find_package(Boost REQUIRED COMPONENTS system filesystem)
 find_package(GDAL REQUIRED)
 find_package(nlohmann_json REQUIRED)
+
+# Manual Boost setup for AppleClang 17.0.0 compatibility
+if(APPLE)
+    # Find Boost headers manually
+    find_path(BOOST_INCLUDE_DIR boost/version.hpp
+        PATHS
+        /opt/homebrew/include
+        /usr/local/include
+        /usr/include
+    )
+    
+    # Find Boost libraries manually
+    find_library(BOOST_SYSTEM_LIB boost_system
+        PATHS
+        /opt/homebrew/lib
+        /usr/local/lib
+        /usr/lib
+    )
+    
+    find_library(BOOST_FILESYSTEM_LIB boost_filesystem
+        PATHS
+        /opt/homebrew/lib
+        /usr/local/lib
+        /usr/lib
+    )
+    
+    if(BOOST_INCLUDE_DIR AND BOOST_SYSTEM_LIB AND BOOST_FILESYSTEM_LIB)
+        message(STATUS "Found Boost manually:")
+        message(STATUS "  Headers: ${BOOST_INCLUDE_DIR}")
+        message(STATUS "  System library: ${BOOST_SYSTEM_LIB}")
+        message(STATUS "  Filesystem library: ${BOOST_FILESYSTEM_LIB}")
+        
+        # Create Boost targets manually
+        add_library(Boost::system UNKNOWN IMPORTED)
+        set_target_properties(Boost::system PROPERTIES
+            IMPORTED_LOCATION ${BOOST_SYSTEM_LIB}
+            INTERFACE_INCLUDE_DIRECTORIES ${BOOST_INCLUDE_DIR}
+        )
+        
+        add_library(Boost::filesystem UNKNOWN IMPORTED)
+        set_target_properties(Boost::filesystem PROPERTIES
+            IMPORTED_LOCATION ${BOOST_FILESYSTEM_LIB}
+            INTERFACE_INCLUDE_DIRECTORIES ${BOOST_INCLUDE_DIR}
+        )
+    else()
+        message(FATAL_ERROR "Could not find Boost libraries manually")
+    endif()
+else()
+    # Use normal find_package for non-Apple systems
+    find_package(Boost REQUIRED COMPONENTS system filesystem)
+endif()
 
 # Include directories
 include_directories(include)
