@@ -10,8 +10,17 @@ if(POLICY CMP0167)
 endif()
 
 # Find required packages
-# Disable Boost's CMake configuration to force use of built-in FindBoost
+# Completely disable Boost's CMake configuration for AppleClang 17.0.0
 set(Boost_NO_BOOST_CMAKE ON)
+set(Boost_NO_SYSTEM_PATHS ON)
+set(Boost_USE_STATIC_LIBS OFF)
+
+# Try to find Boost in Homebrew paths explicitly
+if(APPLE)
+    set(BOOST_ROOT "/opt/homebrew")
+    set(Boost_INCLUDE_DIR "/opt/homebrew/include")
+    set(Boost_LIBRARY_DIR "/opt/homebrew/lib")
+endif()
 
 find_package(Boost REQUIRED COMPONENTS system filesystem)
 find_package(GDAL REQUIRED)
