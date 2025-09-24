@@ -1,0 +1,4 @@
+adjfind usr/bin/
+README.md usr/share/adjfind/
+LICENSE usr/share/adjfind/
+assets/ usr/share/adjfind/

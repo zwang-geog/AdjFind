@@ -1,0 +1,15 @@
+#!/usr/bin/make -f
+
+export DEB_BUILD_MAINT_OPTIONS = hardening=+all
+export DEB_CFLAGS_MAINT_APPEND  = -Wall -pedantic
+export DEB_LDFLAGS_MAINT_APPEND = -Wl,--as-needed
+
+%:
+	dh $@
+
+override_dh_auto_configure:
+	mkdir -p build
+	cd build && cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr
+
+override_dh_auto_test:
+	# Skip tests - no tests configured

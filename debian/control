@@ -1,0 +1,38 @@
+Source: adjfind
+Maintainer: Zifan Wang <zwang.geog@gmail.com>
+Section: science
+Priority: optional
+Build-Depends: debhelper-compat (= 13),
+               cmake (>= 3.16),
+               build-essential,
+               libgdal-dev,
+               libboost-all-dev,
+               nlohmann-json3-dev,
+               pkg-config
+Standards-Version: 4.6.2
+Homepage: https://github.com/zwang-geog/AdjFind
+Vcs-Git: https://github.com/zwang-geog/AdjFind.git
+Vcs-Browser: https://github.com/zwang-geog/AdjFind
+Rules-Requires-Root: no
+
+Package: adjfind
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}, libgdal32 (>= 3.0.0), libboost-system (>= 1.74.0), libboost-filesystem (>= 1.74.0)
+Description: A C++ program containing specialized path finding algorithms related to adjacency/proximity
+ .
+ The application supports three main modes:
+ .
+  * Road Segmentation Mode: Determines which service points (e.g., hydrants)
+    are closest to each road segment using network distance, and optionally
+    splits roads into discrete distance categories for service area analysis.
+ .
+  * Neighboring Points Mode: Identifies the nearest neighboring service points
+    along a road network in each direction, calculating spacing distances
+    between facilities like hydrants for regulatory compliance assessment.
+ .
+  * Structure Access Mode: Computes shortest unobstructed paths from building
+    corners to road networks, finding the least accessible points on buildings
+    for emergency response planning and fire code compliance.
+ .
+ This tool is particularly useful for urban planning, emergency services
+ planning, and transportation network analysis.
