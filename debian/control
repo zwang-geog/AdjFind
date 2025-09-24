@@ -5,10 +5,9 @@ Priority: optional
 Build-Depends: debhelper-compat (= 13),
                cmake (>= 3.16),
                build-essential,
-               libgdal-dev,
-               libboost-all-dev,
                nlohmann-json3-dev,
-               pkg-config
+               pkg-config,
+               libcurl4-openssl-dev
 Standards-Version: 4.6.2
 Homepage: https://github.com/zwang-geog/AdjFind
 Vcs-Git: https://github.com/zwang-geog/AdjFind.git
@@ -17,7 +16,7 @@ Rules-Requires-Root: no
 
 Package: adjfind
 Architecture: any
-Depends: ${shlibs:Depends}, ${misc:Depends}, libgdal32 (>= 3.0.0), libboost-system (>= 1.74.0), libboost-filesystem (>= 1.74.0)
+Depends: ${shlibs:Depends}, ${misc:Depends}
 Description: A C++ program containing specialized path finding algorithms related to adjacency/proximity
  .
  The application supports three main modes:

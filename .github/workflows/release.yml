@@ -15,7 +15,19 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake build-essential libgdal-dev libboost-all-dev nlohmann-json3-dev
+          sudo apt-get install -y cmake build-essential
+          
+          # Install Miniconda
+          wget https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-Linux-x86_64.sh
+          bash Miniforge3-Linux-x86_64.sh -b -p $HOME/miniforge3
+          source $HOME/miniforge3/bin/activate
+          
+          # Install specific versions of dependencies via conda
+          conda install -c conda-forge gdal=3.10.2 boost-cpp=1.82.0 nlohmann_json cmake -y
+          
+          # Add conda paths to environment
+          echo "CONDA_PREFIX=$HOME/miniforge3" >> $GITHUB_ENV
+          echo "CMAKE_PREFIX_PATH=$HOME/miniforge3" >> $GITHUB_ENV
       
       - name: Build
         run: |
@@ -35,32 +47,76 @@ jobs:
       
       - name: Install dependencies
         run: |
-          brew install cmake gdal nlohmann-json
+          brew install cmake nlohmann-json
           
-      - name: Install Boost via conda
+      - name: Install dependencies via conda
         run: |
           # Install miniconda
           curl -L -O "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-MacOSX-arm64.sh"
           bash Miniforge3-MacOSX-arm64.sh -b -p $HOME/miniforge3
           source $HOME/miniforge3/bin/activate
           
-          # Install Boost via conda
-          conda install -c conda-forge boost-cpp -y
+          # Install specific versions of dependencies via conda
+          conda install -c conda-forge gdal=3.10.2 boost-cpp=1.82.0 nlohmann_json cmake -y
           
           # Add conda paths to environment
           echo "CONDA_PREFIX=$HOME/miniforge3" >> $GITHUB_ENV
           echo "CMAKE_PREFIX_PATH=$HOME/miniforge3" >> $GITHUB_ENV
+      
+      - name: Import Apple Certificate
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+        run: |
+          # Create variables
+          CERTIFICATE_PATH=$RUNNER_TEMP/build_certificate.p12
+          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain
+          
+          # Import certificate from secrets
+          echo -n "$APPLE_CERTIFICATE" | base64 --decode --output $CERTIFICATE_PATH
+          
+          # Create temporary keychain
+          security create-keychain -p "$APPLE_CERTIFICATE_PASSWORD" $KEYCHAIN_PATH
+          security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
+          security unlock-keychain -p "$APPLE_CERTIFICATE_PASSWORD" $KEYCHAIN_PATH
+          
+          # Import certificate to keychain
+          security import $CERTIFICATE_PATH -P "$APPLE_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
+          security list-keychain -d user -s $KEYCHAIN_PATH
+          
+          # Set certificate identity
+          security find-identity -v -p codesigning $KEYCHAIN_PATH
+          
+          # Set environment variables for code signing
+          echo "CERTIFICATE_PATH=$CERTIFICATE_PATH" >> $GITHUB_ENV
+          echo "KEYCHAIN_PATH=$KEYCHAIN_PATH" >> $GITHUB_ENV
+          echo "APPLE_TEAM_ID=${{ secrets.APPLE_TEAM_ID }}" >> $GITHUB_ENV
       
       - name: Build
         run: |
           chmod +x scripts/build.sh
           ./scripts/build.sh --build-type Release
       
+      - name: Code Sign Executable
+        run: |
+          # Code sign the executable
+          codesign --force --sign "Developer ID Application: ${{ secrets.APPLE_TEAM_ID }}" --timestamp --options runtime build/adjfind
+          
+          # Verify the signature
+          codesign --verify --verbose build/adjfind
+          spctl --assess --verbose build/adjfind
+      
+      - name: Create Package
+        run: |
+          # Create tar.gz package with signed executable
+          cd build
+          tar -czf adjfind-macos-signed.tar.gz adjfind
+      
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
           name: adjfind-macos
-          path: build/adjfind-*.tar.gz
+          path: build/adjfind-macos-signed.tar.gz
 
   build-windows:
     runs-on: windows-latest

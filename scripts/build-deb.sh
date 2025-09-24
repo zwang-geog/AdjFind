@@ -33,10 +33,10 @@ fi
 # Check for required tools
 print_status "Checking for required tools..."
 
-for tool in dpkg-buildpackage debhelper cmake make; do
+for tool in dpkg-buildpackage dh cmake make; do
     if ! command -v $tool &> /dev/null; then
         print_error "$tool is not installed. Please install it first:"
-        echo "sudo apt update && sudo apt install dpkg-dev debhelper cmake build-essential"
+        echo "sudo apt update && sudo apt install dpkg-dev debhelper-compat cmake build-essential"
         exit 1
     fi
 done

@@ -1,4 +1,4 @@
-adjfind (1.0.1-1) unstable; urgency=medium
+adjfind (1.0.1) unstable; urgency=medium
 
   * Initial release of AdjFind transportation network algorithms
   * Implements road segmentation mode for service area analysis
@@ -6,4 +6,4 @@ adjfind (1.0.1-1) unstable; urgency=medium
   * Implements structure access mode for accessibility planning
   * Supports multiple geospatial data formats via GDAL
 
- -- Zifan Wang <zwang.geog@gmail.com> Tue, 23 Sep 2025 19:30:00 -0800
+ -- Zifan Wang <zwang.geog@gmail.com>  Tue, 24 Sep 2024 19:30:00 +0000

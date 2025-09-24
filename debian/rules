@@ -9,7 +9,22 @@ export DEB_LDFLAGS_MAINT_APPEND = -Wl,--as-needed
 
 override_dh_auto_configure:
 	mkdir -p build
-	cd build && cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr
+	# Use conda Boost if available, otherwise use system Boost
+	if [ -n "$$CONDA_PREFIX" ] && [ -d "$$CONDA_PREFIX" ]; then \
+		cd build && cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr -DCMAKE_PREFIX_PATH="$$CONDA_PREFIX"; \
+	else \
+		cd build && cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/usr; \
+	fi
+
+override_dh_auto_build:
+	cd build && make -j1
+
+override_dh_auto_install:
+	cd build && make install DESTDIR=$(CURDIR)/debian/adjfind
+
+override_dh_install:
+	# Files are already installed to debian/adjfind/ by override_dh_auto_install
+	# No need to copy them again
 
 override_dh_auto_test:
 	# Skip tests - no tests configured
