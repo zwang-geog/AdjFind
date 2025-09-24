@@ -22,8 +22,11 @@ jobs:
           bash Miniforge3-Linux-x86_64.sh -b -p $HOME/miniforge3
           source $HOME/miniforge3/bin/activate
           
-          # Install specific versions of dependencies via conda
-          conda install -c conda-forge "gdal>=3.3.0,<3.4.0" "boost-cpp>=1.78.0,<1.79.0" nlohmann_json cmake -y
+          # Install dependencies one by one to avoid conflicts
+          conda install -c conda-forge cmake -y
+          conda install -c conda-forge nlohmann_json -y
+          conda install -c conda-forge boost-cpp=1.82.0 -y
+          conda install -c conda-forge gdal=3.6.2 -y
           
           # Add conda paths to environment
           echo "CONDA_PREFIX=$HOME/miniforge3" >> $GITHUB_ENV
@@ -56,8 +59,11 @@ jobs:
           bash Miniforge3-MacOSX-arm64.sh -b -p $HOME/miniforge3
           source $HOME/miniforge3/bin/activate
           
-          # Install specific versions of dependencies via conda
-          conda install -c conda-forge "gdal>=3.3.0,<3.4.0" "boost-cpp>=1.78.0,<1.79.0" nlohmann_json cmake -y
+          # Install dependencies one by one to avoid conflicts
+          conda install -c conda-forge cmake -y
+          conda install -c conda-forge nlohmann_json -y
+          conda install -c conda-forge boost-cpp=1.82.0 -y
+          conda install -c conda-forge gdal=3.6.2 -y
           
           # Add conda paths to environment
           echo "CONDA_PREFIX=$HOME/miniforge3" >> $GITHUB_ENV
