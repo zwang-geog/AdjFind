@@ -1,4 +1,5 @@
 name: adjfind
+base: core24
 version: '1.0.0'
 summary: A C++ program containing specialized path finding algorithms related to adjacency/proximity
 description: |
