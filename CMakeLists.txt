@@ -4,13 +4,17 @@ project(adjfind VERSION 1.0.1)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Set policy for Boost
+# Set policies for modern CMake
 if(POLICY CMP0167)
     cmake_policy(SET CMP0167 NEW)
 endif()
 
+if(POLICY CMP0144)
+    cmake_policy(SET CMP0144 NEW)
+endif()
+
 # Find required packages
-find_package(Boost REQUIRED COMPONENTS system filesystem)
+find_package(Boost REQUIRED)
 find_package(GDAL REQUIRED)
 find_package(nlohmann_json REQUIRED)
 
@@ -54,20 +58,13 @@ set(HEADERS
 # Create executable
 add_executable(adjfind ${SOURCES} ${HEADERS})
 
-# Link libraries
+# Link libraries using modern CMake targets
 target_link_libraries(adjfind
     PRIVATE
-    ${GDAL_LIBRARIES}
-    Boost::system
-    Boost::filesystem
+    GDAL::GDAL
+    Boost::boost
     nlohmann_json::nlohmann_json
 )
-
-# Include directories for GDAL
-target_include_directories(adjfind PRIVATE ${GDAL_INCLUDE_DIRS})
-
-# Compiler flags
-target_compile_definitions(adjfind PRIVATE ${GDAL_DEFINITIONS})
 
 # Enable packaging
 include(CPack)

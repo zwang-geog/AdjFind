@@ -8,6 +8,19 @@ This repository contains the source code for the AdjFind project, a C++ applicat
 
 • **Structure Access Mode**: Computes shortest unobstructed paths from building corners to road networks, finding the least accessible points on buildings for emergency response planning and fire code compliance.
 
+## Quick Installation (macOS)
+
+The easiest way to install AdjFind on macOS is using Homebrew (experimental):
+
+```bash
+brew install --build-from-source https://raw.githubusercontent.com/zwang-geog/AdjFind/Formula/adjfind.rb
+```
+
+Then run:
+```bash
+adjfind --help
+```
+
 ## Supported Algorithms/Modes
 
 ### 1. Split road to service area or discrete distance brackets/categories (`--mode road-segmentation`)

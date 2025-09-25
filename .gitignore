@@ -4,6 +4,11 @@ build-*/
 out/
 cmake-build-*/
 
+# Boost
+boost/
+boost_1_82_0/
+boost_1_84_0/
+
 # CMake generated files
 CMakeCache.txt
 CMakeFiles/
