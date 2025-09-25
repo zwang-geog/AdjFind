@@ -207,25 +207,25 @@ Before building this project, ensure you have the following dependencies install
 - **C++ Compiler** with C++17 support (Clang 16.0.0)
 - **GDAL** (version 3.10.2) - for data IO
 - **Boost** (version 1.82.0) - for boost geometry library
-- **nlohmann_json** (version 3.12.0) - for parameter parsing
+- **nlohmann_json** (version 3.12.0) - for parameter parsing (WASM builds only)
 
 ### Installing Dependencies
 
 **Note on Linking Strategy:**
 - **GDAL**: Dynamically linked - must be installed on the target system
 - **Boost**: Mixed approach - geometry (header-only), system/filesystem (compiled but statically linked) - no runtime installation needed  
-- **nlohmann_json**: Header-only library - included in the binary
+- **nlohmann_json**: Header-only library - included in the binary (WASM builds only)
 - **Standard libraries**: Partially statically linked for better compatibility
 
 #### On Ubuntu/Debian:
 ```bash
 sudo apt update
-sudo apt install cmake build-essential libgdal-dev libboost-all-dev nlohmann-json3-dev
+sudo apt install cmake build-essential libgdal-dev libboost-all-dev
 ```
 
 #### On macOS (using Homebrew):
 ```bash
-brew install cmake gdal boost nlohmann-json
+brew install cmake gdal boost
 ```
 
 #### On Windows:
@@ -234,7 +234,7 @@ brew install cmake gdal boost nlohmann-json
 - Install dependencies via vcpkg:
   ```bash
   winget install Microsoft.vcpkg
-  vcpkg install gdal:x64-windows boost:x64-windows nlohmann-json:x64-windows
+  vcpkg install gdal:x64-windows boost:x64-windows
   ```
 
 ### Building the Project

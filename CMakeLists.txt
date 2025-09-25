@@ -16,7 +16,6 @@ endif()
 # Find required packages
 find_package(Boost REQUIRED)
 find_package(GDAL REQUIRED)
-find_package(nlohmann_json REQUIRED)
 
 # Include directories
 include_directories(include)
@@ -63,7 +62,6 @@ target_link_libraries(adjfind
     PRIVATE
     GDAL::GDAL
     Boost::boost
-    nlohmann_json::nlohmann_json
 )
 
 # Enable packaging
