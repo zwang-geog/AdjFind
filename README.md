@@ -10,10 +10,14 @@ This repository contains the source code for the AdjFind project, a C++ applicat
 
 ## Quick Installation (macOS)
 
-The easiest way to install AdjFind on macOS is using Homebrew (experimental):
+The easiest way to install AdjFind on macOS is using Homebrew:
 
 ```bash
-brew install --build-from-source https://raw.githubusercontent.com/zwang-geog/AdjFind/Formula/adjfind.rb
+# Add the repository as a tap
+brew tap zwang-geog/AdjFind https://github.com/zwang-geog/AdjFind.git
+
+# Install from the tap
+brew install zwang-geog/adjfind/adjfind
 ```
 
 Then run:
