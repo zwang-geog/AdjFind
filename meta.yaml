@@ -39,10 +39,10 @@ requirements:
     - {{ compiler('cxx') }}
     - {{ compiler('c') }}
   host:
-    - libgdal-core >=3.9.0,<3.10.0a0  # Build against GDAL 3.9.x only
-    - boost-cpp >= 1.82.0
+    - libgdal-core
+    - boost-cpp
   run:
-    - libgdal-core >=3.9.0,<4.0.0a0   # Runtime: support 3.9.x through 3.11.x
+    - libgdal-core
 
 test:
   commands:
