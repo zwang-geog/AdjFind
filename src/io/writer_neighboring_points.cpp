@@ -1,9 +1,8 @@
 #include "io/writer_neighboring_points.hpp"
 #include "graph/neighboring_points.hpp"
 #include <gdal.h>
-#include <gdal_priv.h>
-#include <ogr_feature.h>
-#include <ogr_geometry.h>
+#include <ogr_api.h>
+#include <ogr_spatialref.h>
 #include <iostream>
 #include <filesystem>
 #include <algorithm>
@@ -33,17 +32,17 @@ bool NeighboringPointsWriter::writeNeighboringPointsResults(const NeighboringPoi
                                                            const graph::NeighboringPoints& neighboring_points_instance) {
     
     // Create linestring dataset
-    OGRCoordinateTransformation* coord_trans_linestring = nullptr;
+    OGRCoordinateTransformationH coord_trans_linestring = nullptr;
     std::string linestring_file_path = config.output_file_path;
-    void* linestring_dataset = createLinestringDataset(config, coord_trans_linestring, linestring_file_path);
+    GDALDatasetH linestring_dataset = createLinestringDataset(config, coord_trans_linestring, linestring_file_path);
     if (!linestring_dataset) {
         return false;
     }
     
     // Create point dataset
-    OGRCoordinateTransformation* coord_trans_point = nullptr;
+    OGRCoordinateTransformationH coord_trans_point = nullptr;
     std::string point_file_path = generateSnappedPointsFilePath(config.output_file_path);
-    void* point_dataset = createPointDataset(config, coord_trans_point, point_file_path);
+    GDALDatasetH point_dataset = createPointDataset(config, coord_trans_point, point_file_path);
     if (!point_dataset) {
         if (coord_trans_linestring) {
             OCTDestroyCoordinateTransformation(coord_trans_linestring);
@@ -53,8 +52,8 @@ bool NeighboringPointsWriter::writeNeighboringPointsResults(const NeighboringPoi
     }
     
     // Get layers
-    OGRLayer* linestring_layer = static_cast<GDALDataset*>(linestring_dataset)->GetLayer(0);
-    OGRLayer* point_layer = static_cast<GDALDataset*>(point_dataset)->GetLayer(0);
+    OGRLayerH linestring_layer = GDALDatasetGetLayer(linestring_dataset, 0);
+    OGRLayerH point_layer = GDALDatasetGetLayer(point_dataset, 0);
     
     if (!linestring_layer || !point_layer) {
         last_error_ = "Failed to get layers from datasets";
@@ -87,7 +86,7 @@ bool NeighboringPointsWriter::writeNeighboringPointsResults(const NeighboringPoi
     return success;
 }
 
-void* NeighboringPointsWriter::createLinestringDataset(const NeighboringPointsWriterConfig& config, OGRCoordinateTransformation*& coord_trans, std::string& output_file_path) {
+GDALDatasetH NeighboringPointsWriter::createLinestringDataset(const NeighboringPointsWriterConfig& config, OGRCoordinateTransformationH& coord_trans, std::string& output_file_path) {
     // Initialize coordinate transformation
     coord_trans = nullptr;
     
@@ -95,21 +94,28 @@ void* NeighboringPointsWriter::createLinestringDataset(const NeighboringPointsWr
     bool reprojection_succeeded = false;
     if (config.reproject_to_epsg4326) {
         if (!config.crs_wkt.empty()) {
-            OGRSpatialReference source_srs, target_srs;
-            source_srs.importFromWkt(config.crs_wkt.c_str());
-            target_srs.importFromEPSG(4326);
+            OGRSpatialReferenceH source_srs = OSRNewSpatialReference(nullptr);
+            OGRSpatialReferenceH target_srs = OSRNewSpatialReference(nullptr);
+            
+            char* wkt_copy = const_cast<char*>(config.crs_wkt.c_str());
+            OSRImportFromWkt(source_srs, &wkt_copy);
+            OSRImportFromEPSG(target_srs, 4326);
             
             // Set axis mapping strategy for GDAL 3+
-            source_srs.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
-            target_srs.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
+            OSRSetAxisMappingStrategy(source_srs, OAMS_TRADITIONAL_GIS_ORDER);
+            OSRSetAxisMappingStrategy(target_srs, OAMS_TRADITIONAL_GIS_ORDER);
             
-            coord_trans = OGRCreateCoordinateTransformation(&source_srs, &target_srs);
+            coord_trans = OCTNewCoordinateTransformation(source_srs, target_srs);
             if (coord_trans) {
                 reprojection_succeeded = true;
             } else {
                 std::cerr << "Warning: Failed to create coordinate transformation to EPSG:4326" << std::endl;
                 std::cerr << "Output will use original coordinate system" << std::endl;
             }
+            
+            // Clean up spatial references
+            OSRDestroySpatialReference(source_srs);
+            OSRDestroySpatialReference(target_srs);
         } else {
             std::cerr << "Warning: Cannot reproject to EPSG:4326 - no source coordinate system specified" << std::endl;
             std::cerr << "Output will use original coordinate system" << std::endl;
@@ -121,7 +127,7 @@ void* NeighboringPointsWriter::createLinestringDataset(const NeighboringPointsWr
     std::string format = GDALUtils::determineFormatAndModifyPath(output_file_path);
     
     // Get driver
-    GDALDriver* driver = GetGDALDriverManager()->GetDriverByName(format.c_str());
+    GDALDriverH driver = GDALGetDriverByName(format.c_str());
     if (!driver) {
         last_error_ = "Failed to get GDAL driver for format: " + format;
         if (coord_trans) {
@@ -132,7 +138,7 @@ void* NeighboringPointsWriter::createLinestringDataset(const NeighboringPointsWr
     }
     
     // Create dataset using the potentially modified file path
-    GDALDataset* dataset = driver->Create(output_file_path.c_str(), 0, 0, 0, GDT_Unknown, nullptr);
+    GDALDatasetH dataset = GDALCreate(driver, output_file_path.c_str(), 0, 0, 0, GDT_Unknown, nullptr);
     if (!dataset) {
         last_error_ = "Failed to create GDAL dataset: " + output_file_path;
         if (coord_trans) {
@@ -143,32 +149,32 @@ void* NeighboringPointsWriter::createLinestringDataset(const NeighboringPointsWr
     }
     
     // Create layer with appropriate CRS
-    OGRSpatialReference* layer_srs = nullptr;
-    OGRSpatialReference wgs84_srs;
+    OGRSpatialReferenceH layer_srs = nullptr;
     
     if (config.reproject_to_epsg4326 && reprojection_succeeded) {
         // If reprojection is enabled and succeeded, use WGS84 for layer CRS
-        wgs84_srs.importFromEPSG(4326);
-        wgs84_srs.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
-        layer_srs = &wgs84_srs;
+        layer_srs = OSRNewSpatialReference(nullptr);
+        OSRImportFromEPSG(layer_srs, 4326);
+        OSRSetAxisMappingStrategy(layer_srs, OAMS_TRADITIONAL_GIS_ORDER);
     } else if (!config.crs_wkt.empty()) {
         // If no reprojection or reprojection failed, use source CRS
-        layer_srs = new OGRSpatialReference();
-        if (layer_srs->importFromWkt(config.crs_wkt.c_str()) != OGRERR_NONE) {
-            delete layer_srs;
+        layer_srs = OSRNewSpatialReference(nullptr);
+        char* wkt_copy = const_cast<char*>(config.crs_wkt.c_str());
+        if (OSRImportFromWkt(layer_srs, &wkt_copy) != OGRERR_NONE) {
+            OSRDestroySpatialReference(layer_srs);
             layer_srs = nullptr;
         } else {
-            layer_srs->SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
+            OSRSetAxisMappingStrategy(layer_srs, OAMS_TRADITIONAL_GIS_ORDER);
         }
     }
     
     // Create layer
     std::string layer_name = "neighboring_paths";
-    OGRLayer* layer = dataset->CreateLayer(layer_name.c_str(), layer_srs, wkbMultiLineString, nullptr);
+    OGRLayerH layer = GDALDatasetCreateLayer(dataset, layer_name.c_str(), layer_srs, wkbMultiLineString, nullptr);
     if (!layer) {
         last_error_ = "Failed to create layer in dataset";
-        if (layer_srs && layer_srs != &wgs84_srs) {
-            delete layer_srs;
+        if (layer_srs) {
+            OSRDestroySpatialReference(layer_srs);
         }
         GDALClose(dataset);
         if (coord_trans) {
@@ -179,26 +185,30 @@ void* NeighboringPointsWriter::createLinestringDataset(const NeighboringPointsWr
     }
     
     // Create fields
-    OGRFieldDefn path_id_field("path_id", OFTInteger);
-    layer->CreateField(&path_id_field);
+    OGRFieldDefnH path_id_field = OGR_Fld_Create("path_id", OFTInteger);
+    OGR_L_CreateField(layer, path_id_field, 1);
+    OGR_Fld_Destroy(path_id_field);
     
-    OGRFieldDefn source_point_id_field("source_point_id", OFTInteger);
-    layer->CreateField(&source_point_id_field);
+    OGRFieldDefnH source_point_id_field = OGR_Fld_Create("source_point_id", OFTInteger);
+    OGR_L_CreateField(layer, source_point_id_field, 1);
+    OGR_Fld_Destroy(source_point_id_field);
     
-    OGRFieldDefn target_point_id_field("target_point_id", OFTInteger);
-    layer->CreateField(&target_point_id_field);
+    OGRFieldDefnH target_point_id_field = OGR_Fld_Create("target_point_id", OFTInteger);
+    OGR_L_CreateField(layer, target_point_id_field, 1);
+    OGR_Fld_Destroy(target_point_id_field);
     
-    OGRFieldDefn distance_field("distance", OFTReal);
-    layer->CreateField(&distance_field);
+    OGRFieldDefnH distance_field = OGR_Fld_Create("distance", OFTReal);
+    OGR_L_CreateField(layer, distance_field, 1);
+    OGR_Fld_Destroy(distance_field);
     
-    if (layer_srs && layer_srs != &wgs84_srs) {
-        delete layer_srs;
+    if (layer_srs) {
+        OSRDestroySpatialReference(layer_srs);
     }
     
     return dataset;
 }
 
-void* NeighboringPointsWriter::createPointDataset(const NeighboringPointsWriterConfig& config, OGRCoordinateTransformation*& coord_trans, std::string& output_file_path) {
+GDALDatasetH NeighboringPointsWriter::createPointDataset(const NeighboringPointsWriterConfig& config, OGRCoordinateTransformationH& coord_trans, std::string& output_file_path) {
     // Initialize coordinate transformation
     coord_trans = nullptr;
     
@@ -206,21 +216,28 @@ void* NeighboringPointsWriter::createPointDataset(const NeighboringPointsWriterC
     bool reprojection_succeeded = false;
     if (config.reproject_to_epsg4326) {
         if (!config.crs_wkt.empty()) {
-            OGRSpatialReference source_srs, target_srs;
-            source_srs.importFromWkt(config.crs_wkt.c_str());
-            target_srs.importFromEPSG(4326);
+            OGRSpatialReferenceH source_srs = OSRNewSpatialReference(nullptr);
+            OGRSpatialReferenceH target_srs = OSRNewSpatialReference(nullptr);
+            
+            char* wkt_copy = const_cast<char*>(config.crs_wkt.c_str());
+            OSRImportFromWkt(source_srs, &wkt_copy);
+            OSRImportFromEPSG(target_srs, 4326);
             
             // Set axis mapping strategy for GDAL 3+
-            source_srs.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
-            target_srs.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
+            OSRSetAxisMappingStrategy(source_srs, OAMS_TRADITIONAL_GIS_ORDER);
+            OSRSetAxisMappingStrategy(target_srs, OAMS_TRADITIONAL_GIS_ORDER);
             
-            coord_trans = OGRCreateCoordinateTransformation(&source_srs, &target_srs);
+            coord_trans = OCTNewCoordinateTransformation(source_srs, target_srs);
             if (coord_trans) {
                 reprojection_succeeded = true;
             } else {
                 std::cerr << "Warning: Failed to create coordinate transformation to EPSG:4326" << std::endl;
                 std::cerr << "Output will use original coordinate system" << std::endl;
             }
+            
+            // Clean up spatial references
+            OSRDestroySpatialReference(source_srs);
+            OSRDestroySpatialReference(target_srs);
         } else {
             std::cerr << "Warning: Cannot reproject to EPSG:4326 - no source coordinate system specified" << std::endl;
             std::cerr << "Output will use original coordinate system" << std::endl;
@@ -231,7 +248,7 @@ void* NeighboringPointsWriter::createPointDataset(const NeighboringPointsWriterC
     std::string format = GDALUtils::determineFormatAndModifyPath(output_file_path);
     
     // Get driver
-    GDALDriver* driver = GetGDALDriverManager()->GetDriverByName(format.c_str());
+    GDALDriverH driver = GDALGetDriverByName(format.c_str());
     if (!driver) {
         last_error_ = "Failed to get GDAL driver for format: " + format;
         if (coord_trans) {
@@ -242,7 +259,7 @@ void* NeighboringPointsWriter::createPointDataset(const NeighboringPointsWriterC
     }
     
     // Create dataset using the potentially modified file path
-    GDALDataset* dataset = driver->Create(output_file_path.c_str(), 0, 0, 0, GDT_Unknown, nullptr);
+    GDALDatasetH dataset = GDALCreate(driver, output_file_path.c_str(), 0, 0, 0, GDT_Unknown, nullptr);
     if (!dataset) {
         last_error_ = "Failed to create GDAL dataset: " + output_file_path;
         if (coord_trans) {
@@ -253,32 +270,32 @@ void* NeighboringPointsWriter::createPointDataset(const NeighboringPointsWriterC
     }
     
     // Create layer with appropriate CRS
-    OGRSpatialReference* layer_srs = nullptr;
-    OGRSpatialReference wgs84_srs;
+    OGRSpatialReferenceH layer_srs = nullptr;
     
     if (config.reproject_to_epsg4326 && reprojection_succeeded) {
         // If reprojection is enabled and succeeded, use WGS84 for layer CRS
-        wgs84_srs.importFromEPSG(4326);
-        wgs84_srs.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
-        layer_srs = &wgs84_srs;
+        layer_srs = OSRNewSpatialReference(nullptr);
+        OSRImportFromEPSG(layer_srs, 4326);
+        OSRSetAxisMappingStrategy(layer_srs, OAMS_TRADITIONAL_GIS_ORDER);
     } else if (!config.crs_wkt.empty()) {
         // If no reprojection or reprojection failed, use source CRS
-        layer_srs = new OGRSpatialReference();
-        if (layer_srs->importFromWkt(config.crs_wkt.c_str()) != OGRERR_NONE) {
-            delete layer_srs;
+        layer_srs = OSRNewSpatialReference(nullptr);
+        char* wkt_copy = const_cast<char*>(config.crs_wkt.c_str());
+        if (OSRImportFromWkt(layer_srs, &wkt_copy) != OGRERR_NONE) {
+            OSRDestroySpatialReference(layer_srs);
             layer_srs = nullptr;
         } else {
-            layer_srs->SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
+            OSRSetAxisMappingStrategy(layer_srs, OAMS_TRADITIONAL_GIS_ORDER);
         }
     }
     
     // Create layer
     std::string layer_name = "snapped_points";
-    OGRLayer* layer = dataset->CreateLayer(layer_name.c_str(), layer_srs, wkbPoint, nullptr);
+    OGRLayerH layer = GDALDatasetCreateLayer(dataset, layer_name.c_str(), layer_srs, wkbPoint, nullptr);
     if (!layer) {
         last_error_ = "Failed to create layer in dataset";
-        if (layer_srs && layer_srs != &wgs84_srs) {
-            delete layer_srs;
+        if (layer_srs) {
+            OSRDestroySpatialReference(layer_srs);
         }
         GDALClose(dataset);
         if (coord_trans) {
@@ -289,23 +306,28 @@ void* NeighboringPointsWriter::createPointDataset(const NeighboringPointsWriterC
     }
     
     // Create fields
-    OGRFieldDefn feature_id_field("feature_id", OFTInteger);
-    layer->CreateField(&feature_id_field);
+    OGRFieldDefnH feature_id_field = OGR_Fld_Create("feature_id", OFTInteger);
+    OGR_L_CreateField(layer, feature_id_field, 1);
+    OGR_Fld_Destroy(feature_id_field);
     
-    OGRFieldDefn count_field("count", OFTInteger);
-    layer->CreateField(&count_field);
+    OGRFieldDefnH count_field = OGR_Fld_Create("count", OFTInteger);
+    OGR_L_CreateField(layer, count_field, 1);
+    OGR_Fld_Destroy(count_field);
     
-    OGRFieldDefn min_field("min", OFTReal);
-    layer->CreateField(&min_field);
+    OGRFieldDefnH min_field = OGR_Fld_Create("min", OFTReal);
+    OGR_L_CreateField(layer, min_field, 1);
+    OGR_Fld_Destroy(min_field);
     
-    OGRFieldDefn max_field("max", OFTReal);
-    layer->CreateField(&max_field);
+    OGRFieldDefnH max_field = OGR_Fld_Create("max", OFTReal);
+    OGR_L_CreateField(layer, max_field, 1);
+    OGR_Fld_Destroy(max_field);
     
-    OGRFieldDefn avg_field("avg", OFTReal);
-    layer->CreateField(&avg_field);
+    OGRFieldDefnH avg_field = OGR_Fld_Create("avg", OFTReal);
+    OGR_L_CreateField(layer, avg_field, 1);
+    OGR_Fld_Destroy(avg_field);
     
-    if (layer_srs && layer_srs != &wgs84_srs) {
-        delete layer_srs;
+    if (layer_srs) {
+        OSRDestroySpatialReference(layer_srs);
     }
     
     return dataset;
@@ -322,15 +344,12 @@ std::string NeighboringPointsWriter::generateSnappedPointsFilePath(const std::st
     
 
 
-bool NeighboringPointsWriter::writeLinestringAndPointFeatures(void* linestring_dataset, void* linestring_layer, 
-                                                             OGRCoordinateTransformation* coord_trans_linestring,
-                                                             void* point_dataset, void* point_layer, 
-                                                             OGRCoordinateTransformation* coord_trans_point,
+bool NeighboringPointsWriter::writeLinestringAndPointFeatures(GDALDatasetH linestring_dataset, OGRLayerH linestring_layer, 
+                                                             OGRCoordinateTransformationH coord_trans_linestring,
+                                                             GDALDatasetH point_dataset, OGRLayerH point_layer, 
+                                                             OGRCoordinateTransformationH coord_trans_point,
                                                              const std::unordered_map<std::pair<size_t, size_t>, std::tuple<size_t, double, graph::MultiLineString>, graph::PairHash>& neighboring_points_results,
                                                              const graph::NeighboringPoints& neighboring_points_instance) {
-    
-    OGRLayer* ogr_linestring_layer = static_cast<OGRLayer*>(linestring_layer);
-    OGRLayer* ogr_point_layer = static_cast<OGRLayer*>(point_layer);
     
     size_t path_id = 1;
     
@@ -357,51 +376,45 @@ bool NeighboringPointsWriter::writeLinestringAndPointFeatures(void* linestring_d
         const graph::MultiLineString& path_geometry = std::get<2>(path_result);
         
         // Write linestring feature
-        OGRFeature* feature = OGRFeature::CreateFeature(ogr_linestring_layer->GetLayerDefn());
+        OGRFeatureDefnH layer_defn = OGR_L_GetLayerDefn(linestring_layer);
+        OGRFeatureH feature = OGR_F_Create(layer_defn);
         if (!feature) {
             last_error_ = "Failed to create OGR feature";
             return false;
         }
         
         // Set fields
-        feature->SetField("path_id", static_cast<int>(path_id));
-        feature->SetField("source_point_id", static_cast<int>(source_feature_id));
-        feature->SetField("target_point_id", static_cast<int>(target_feature_id));
-        feature->SetField("distance", distance);
+        OGR_F_SetFieldInteger(feature, OGR_F_GetFieldIndex(feature, "path_id"), static_cast<int>(path_id));
+        OGR_F_SetFieldInteger(feature, OGR_F_GetFieldIndex(feature, "source_point_id"), static_cast<int>(source_feature_id));
+        OGR_F_SetFieldInteger(feature, OGR_F_GetFieldIndex(feature, "target_point_id"), static_cast<int>(target_feature_id));
+        OGR_F_SetFieldDouble(feature, OGR_F_GetFieldIndex(feature, "distance"), distance);
         
         // Set geometry - always create multilinestring for consistency
-        OGRGeometry* ogr_geometry = new OGRMultiLineString();
+        OGRGeometryH ogr_geometry = OGR_G_CreateGeometry(wkbMultiLineString);
         for (const auto& linestring : path_geometry) {
-            OGRLineString* ogr_linestring = new OGRLineString();
+            OGRGeometryH ogr_linestring = OGR_G_CreateGeometry(wkbLineString);
             for (const auto& point : linestring) {
-                ogr_linestring->addPoint(bg::get<0>(point), bg::get<1>(point));
+                OGR_G_AddPoint(ogr_linestring, bg::get<0>(point), bg::get<1>(point), 0.0);
             }
-            static_cast<OGRMultiLineString*>(ogr_geometry)->addGeometry(ogr_linestring);
-            delete ogr_linestring;
+            OGR_G_AddGeometry(ogr_geometry, ogr_linestring);
         }
         
         // Apply coordinate transformation if needed
         if (coord_trans_linestring && ogr_geometry) {
-            ogr_geometry->transform(coord_trans_linestring);
+            OGR_G_Transform(ogr_geometry, coord_trans_linestring);
         }
         
-        feature->SetGeometry(ogr_geometry);
+        OGR_F_SetGeometry(feature, ogr_geometry);
         
         // Create feature in layer
-        if (ogr_linestring_layer->CreateFeature(feature) != OGRERR_NONE) {
+        if (OGR_L_CreateFeature(linestring_layer, feature) != OGRERR_NONE) {
             last_error_ = "Failed to create feature in linestring layer";
-            OGRFeature::DestroyFeature(feature);
-            if (ogr_geometry) {
-                OGRGeometryFactory::destroyGeometry(ogr_geometry);
-            }
+            OGR_F_Destroy(feature);
             return false;
         }
         
         // Cleanup
-        OGRFeature::DestroyFeature(feature);
-        if (ogr_geometry) {
-            OGRGeometryFactory::destroyGeometry(ogr_geometry);
-        }
+        OGR_F_Destroy(feature);
         
         // Update statistics for both source and target vertices
         updateVertexStatistics(source_vertex_index, distance, count_map, min_map, max_map, sum_map);
@@ -429,40 +442,40 @@ bool NeighboringPointsWriter::writeLinestringAndPointFeatures(void* linestring_d
         double avg_distance = (count > 0) ? sum_distance / count : 0.0;
         
         // Create feature
-        OGRFeature* feature = OGRFeature::CreateFeature(ogr_point_layer->GetLayerDefn());
+        OGRFeatureDefnH point_layer_defn = OGR_L_GetLayerDefn(point_layer);
+        OGRFeatureH feature = OGR_F_Create(point_layer_defn);
         if (!feature) {
             last_error_ = "Failed to create OGR feature";
             return false;
         }
         
         // Set fields
-        feature->SetField("feature_id", static_cast<int>(feature_id));
-        feature->SetField("count", static_cast<int>(count));
-        feature->SetField("min", min_distance);
-        feature->SetField("max", max_distance);
-        feature->SetField("avg", avg_distance);
+        OGR_F_SetFieldInteger(feature, OGR_F_GetFieldIndex(feature, "feature_id"), static_cast<int>(feature_id));
+        OGR_F_SetFieldInteger(feature, OGR_F_GetFieldIndex(feature, "count"), static_cast<int>(count));
+        OGR_F_SetFieldDouble(feature, OGR_F_GetFieldIndex(feature, "min"), min_distance);
+        OGR_F_SetFieldDouble(feature, OGR_F_GetFieldIndex(feature, "max"), max_distance);
+        OGR_F_SetFieldDouble(feature, OGR_F_GetFieldIndex(feature, "avg"), avg_distance);
         
         // Set geometry (point)
-        OGRPoint* ogr_point = new OGRPoint(bg::get<0>(point_geometry), bg::get<1>(point_geometry));
+        OGRGeometryH ogr_point = OGR_G_CreateGeometry(wkbPoint);
+        OGR_G_SetPoint(ogr_point, 0, bg::get<0>(point_geometry), bg::get<1>(point_geometry), 0.0);
         
         // Apply coordinate transformation if needed
         if (coord_trans_point) {
-            ogr_point->transform(coord_trans_point);
+            OGR_G_Transform(ogr_point, coord_trans_point);
         }
         
-        feature->SetGeometry(ogr_point);
+        OGR_F_SetGeometry(feature, ogr_point);
         
         // Create feature in layer
-        if (ogr_point_layer->CreateFeature(feature) != OGRERR_NONE) {
+        if (OGR_L_CreateFeature(point_layer, feature) != OGRERR_NONE) {
             last_error_ = "Failed to create feature in point layer";
-            OGRFeature::DestroyFeature(feature);
-            delete ogr_point;
+            OGR_F_Destroy(feature);
             return false;
         }
         
         // Cleanup
-        OGRFeature::DestroyFeature(feature);
-        delete ogr_point;
+        OGR_F_Destroy(feature);
     }
     
     return true;

@@ -3,7 +3,8 @@
 
 #include <string>
 #include <vector>
-#include <ogrsf_frmts.h>
+#include <gdal.h>
+#include <ogr_api.h>
 #include "graph/common.hpp"
 #include "io/gdal_utils.hpp"
 
@@ -63,18 +64,18 @@ private:
      * @param config Writer configuration
      * @param coord_trans Output parameter for coordinate transformation (can be nullptr)
      * @param output_file_path Output parameter for the actual file path used (can be modified for format fallback)
-     * @return GDAL dataset pointer (caller owns the pointer)
+     * @return GDAL dataset handle (caller owns the handle)
      */
-    void* createLinestringDataset(const ConvexPathWriterConfig& config, OGRCoordinateTransformation*& coord_trans, std::string& output_file_path);
+    GDALDatasetH createLinestringDataset(const ConvexPathWriterConfig& config, OGRCoordinateTransformationH& coord_trans, std::string& output_file_path);
     
     /**
      * Create GDAL dataset for writing point features
      * @param config Writer configuration
      * @param coord_trans Output parameter for coordinate transformation (can be nullptr)
      * @param output_file_path Output parameter for the actual file path used (can be modified for format fallback)
-     * @return GDAL dataset pointer (caller owns the pointer)
+     * @return GDAL dataset handle (caller owns the handle)
      */
-    void* createPointDataset(const ConvexPathWriterConfig& config, OGRCoordinateTransformation*& coord_trans, std::string& output_file_path);
+    GDALDatasetH createPointDataset(const ConvexPathWriterConfig& config, OGRCoordinateTransformationH& coord_trans, std::string& output_file_path);
     
     /**
      * Write a single linestring feature
@@ -87,8 +88,8 @@ private:
      * @param feature_id Feature ID
      * @return true if successful, false otherwise
      */
-    bool writeLinestringFeature(void* dataset, void* layer, 
-                               OGRCoordinateTransformation* coord_trans,
+    bool writeLinestringFeature(GDALDatasetH dataset, OGRLayerH layer, 
+                               OGRCoordinateTransformationH coord_trans,
                                const std::vector<graph::ConvexPathResult>& vertex_paths, 
                                size_t polygon_feature_id,
                                const graph::Point& least_accessible_point,
@@ -105,8 +106,8 @@ private:
      * @param feature_id Feature ID
      * @return true if successful, false otherwise
      */
-    bool writePointFeature(void* dataset, void* layer, 
-                          OGRCoordinateTransformation* coord_trans,
+    bool writePointFeature(GDALDatasetH dataset, OGRLayerH layer, 
+                          OGRCoordinateTransformationH coord_trans,
                           const std::vector<graph::ConvexPathResult>& vertex_paths, 
                           size_t polygon_feature_id,
                           const graph::Point& least_accessible_point,

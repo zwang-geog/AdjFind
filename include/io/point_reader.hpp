@@ -5,7 +5,8 @@
 #include <vector>
 #include <memory>
 #include <unordered_map>
-#include <ogrsf_frmts.h>
+#include <gdal.h>
+#include <ogr_api.h>
 #include "graph/common.hpp"
 #include "io/coordinate_system_utils.hpp"
 
@@ -71,7 +72,7 @@ public:
      * Get the spatial reference
      * @return Optional spatial reference
      */
-    std::optional<OGRSpatialReference> getSpatialRef() const;
+    std::optional<OGRSpatialReferenceH> getSpatialRef() const;
     
     /**
      * Clear the spatial index to free memory
@@ -85,13 +86,13 @@ public:
 
 private:
     PointReaderConfig config_;
-    std::unique_ptr<GDALDataset> dataset_;
+    GDALDatasetH dataset_;
     std::vector<graph::PointFeature> points_;
     
     // Coordinate system information
     std::string coordinate_system_wkt_;
     int coordinate_system_epsg_;
-    OGRCoordinateTransformation* coordinate_transformation_;
+    OGRCoordinateTransformationH coordinate_transformation_;
     
     // R-tree for spatial queries
     using PointRTree = graph::bgi::rtree<graph::PointRTreeValue, graph::bgi::quadratic<16>>;
@@ -119,7 +120,7 @@ private:
      * @param field_name Field name
      * @return Field value if exists and can be converted
      */
-    std::optional<size_t> getFieldValueAsSizeT(const OGRFeature* feature,
+    std::optional<size_t> getFieldValueAsSizeT(const OGRFeatureH feature,
                                               const std::string& field_name) const;
     
     /**
@@ -129,7 +130,7 @@ private:
      * @param default_value Default value
      * @return Field value or default
      */
-    double getFieldValueAsDouble(const OGRFeature* feature,
+    double getFieldValueAsDouble(const OGRFeatureH feature,
                                const std::string& field_name,
                                double default_value) const;
     
@@ -138,20 +139,21 @@ private:
      * @param ogr_geom OGR geometry
      * @return Boost Geometry Point
      */
-    graph::Point convertOGRToPoint(const OGRGeometry* ogr_geom) const;
+    graph::Point convertOGRToPoint(const OGRGeometryH ogr_geom) const;
     
     /**
      * Transform geometry coordinates if transformation is available
      * @param geom OGR geometry to transform
      * @return true if transformation was successful or not needed
      */
-    bool transformGeometry(OGRGeometry* geom) const;
+    bool transformGeometry(OGRGeometryH geom) const;
     
     /**
      * Handle coordinate system detection and reprojection
      * @return true if successful, false otherwise
      */
     bool handleCoordinateSystem();
+    
 };
 
 } // namespace io

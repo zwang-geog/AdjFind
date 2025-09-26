@@ -3,7 +3,8 @@
 
 #include <string>
 #include <vector>
-#include <ogrsf_frmts.h>
+#include <gdal.h>
+#include <ogr_api.h>
 #include "graph/common.hpp"
 #include "io/gdal_utils.hpp"
 
@@ -65,9 +66,9 @@ private:
      * @param config Writer configuration
      * @param coord_trans Output parameter for coordinate transformation (can be nullptr)
      * @param output_file_path Output parameter for the actual file path used (can be modified for format fallback)
-     * @return GDAL dataset pointer (caller owns the pointer)
+     * @return GDAL dataset handle (caller owns the handle)
      */
-    void* createGDALDataset(const RoadSegmentationWriterConfig& config, OGRCoordinateTransformation*& coord_trans, std::string& output_file_path);
+    GDALDatasetH createGDALDataset(const RoadSegmentationWriterConfig& config, OGRCoordinateTransformationH& coord_trans, std::string& output_file_path);
     
     /**
      * Write a single road segment feature
@@ -78,8 +79,8 @@ private:
      * @param feature_id Feature ID
      * @return true if successful, false otherwise
      */
-    bool writeFeature(void* dataset, void* layer, 
-                     OGRCoordinateTransformation* coord_trans,
+    bool writeFeature(GDALDatasetH dataset, OGRLayerH layer, 
+                     OGRCoordinateTransformationH coord_trans,
                      const graph::RoadSplitByDistanceBracketsOutput& result, 
                      size_t feature_id);
 };

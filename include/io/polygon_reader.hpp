@@ -5,7 +5,8 @@
 #include <vector>
 #include <memory>
 #include <optional>
-#include <ogrsf_frmts.h>
+#include <gdal.h>
+#include <ogr_api.h>
 #include "graph/common.hpp"
 #include "graph/adj_graph.hpp"
 #include "io/coordinate_system_utils.hpp"
@@ -75,7 +76,7 @@ public:
      * Get the spatial reference
      * @return Optional spatial reference
      */
-    std::optional<OGRSpatialReference> getSpatialRef() const;
+    std::optional<OGRSpatialReferenceH> getSpatialRef() const;
     
     /**
      * Get the minimum polygon boundary segment length for nearest road edge detection
@@ -110,13 +111,13 @@ public:
 
 private:
     PolygonReaderConfig config_;
-    std::unique_ptr<GDALDataset> dataset_;
+    GDALDatasetH dataset_;
     std::vector<graph::PolygonFeature> polygons_;
     
     // Coordinate system information
     std::string coordinate_system_wkt_;
     int coordinate_system_epsg_;
-    OGRCoordinateTransformation* coordinate_transformation_;
+    OGRCoordinateTransformationH coordinate_transformation_;
     
     // R-tree for spatial queries
     using PolygonRTree = graph::bgi::rtree<graph::PolygonRTreeValue, graph::bgi::quadratic<16>>;
@@ -145,7 +146,7 @@ private:
      * @param default_value Default value if field not found
      * @return Field value or default
      */
-    std::optional<size_t> getFieldValueAsSizeT(const OGRFeature* feature,
+    std::optional<size_t> getFieldValueAsSizeT(const OGRFeatureH feature,
                                                const std::string& field_name) const;
     
     /**
@@ -155,7 +156,7 @@ private:
      * @param default_value Default value if field not found
      * @return Field value or default
      */
-    bool getFieldValueAsBool(const OGRFeature* feature,
+    bool getFieldValueAsBool(const OGRFeatureH feature,
                              const std::string& field_name,
                              bool default_value) const;
     
@@ -165,7 +166,7 @@ private:
      * @param field_name Field name
      * @return Field value or empty string
      */
-    std::string getFieldValueAsString(const OGRFeature* feature,
+    std::string getFieldValueAsString(const OGRFeatureH feature,
                                      const std::string& field_name) const;
     
     /**
@@ -180,14 +181,14 @@ private:
      * @param ogr_geom OGR geometry
      * @return Boost geometry polygon
      */
-    graph::Polygon convertOGRToPolygon(const OGRGeometry* ogr_geom) const;
+    graph::Polygon convertOGRToPolygon(const OGRGeometryH ogr_geom) const;
     
     /**
      * Transform geometry to UTM if needed
      * @param geom OGR geometry to transform
      * @return true if successful, false otherwise
      */
-    bool transformGeometry(OGRGeometry* geom) const;
+    bool transformGeometry(OGRGeometryH geom) const;
     
     /**
      * Handle coordinate system transformation
@@ -210,8 +211,9 @@ private:
      * @param is_obstacle_only Whether this polygon is obstacle-only
      * @param snappable_road_ids Vector of snappable road IDs
      */
-    void processSinglePolygon(OGRGeometry* geometry, size_t feature_id, bool is_obstacle_only, 
+    void processSinglePolygon(OGRGeometryH geometry, size_t feature_id, bool is_obstacle_only, 
                              const std::vector<size_t>& snappable_road_ids);
+    
 };
 
 } // namespace io

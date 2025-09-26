@@ -538,8 +538,8 @@ int main(int argc, char* argv[]) {
         
         // Check for version flag
         if (args.count("version") > 0 || args.count("v") > 0) {
-            std::cout << "AdjFind v1.0.0\n";
-            std::cout << "Transportation Network Analysis Tool\n";
+            std::cout << "AdjFind v0.0.1\n";
+            std::cout << "Adjacency/Proximity Path Finding Tool\n";
             std::cout << "Copyright (c) 2025 Zifan Wang\n";
             std::cout << "MIT License\n";
             return 0;

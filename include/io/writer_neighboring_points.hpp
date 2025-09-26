@@ -3,7 +3,8 @@
 
 #include <string>
 #include <vector>
-#include <ogrsf_frmts.h>
+#include <gdal.h>
+#include <ogr_api.h>
 #include "graph/common.hpp"
 #include "io/gdal_utils.hpp"
 
@@ -76,18 +77,18 @@ private:
      * @param config Writer configuration
      * @param coord_trans Output parameter for coordinate transformation (can be nullptr)
      * @param output_file_path Output parameter for the actual file path used (can be modified for format fallback)
-     * @return GDAL dataset pointer (caller owns the pointer)
+     * @return GDAL dataset handle (caller owns the handle)
      */
-    void* createLinestringDataset(const NeighboringPointsWriterConfig& config, OGRCoordinateTransformation*& coord_trans, std::string& output_file_path);
+    GDALDatasetH createLinestringDataset(const NeighboringPointsWriterConfig& config, OGRCoordinateTransformationH& coord_trans, std::string& output_file_path);
     
     /**
      * Create GDAL dataset for writing point features
      * @param config Writer configuration
      * @param coord_trans Output parameter for coordinate transformation (can be nullptr)
      * @param output_file_path Output parameter for the actual file path used (can be modified for format fallback)
-     * @return GDAL dataset pointer (caller owns the pointer)
+     * @return GDAL dataset handle (caller owns the handle)
      */
-    void* createPointDataset(const NeighboringPointsWriterConfig& config, OGRCoordinateTransformation*& coord_trans, std::string& output_file_path);
+    GDALDatasetH createPointDataset(const NeighboringPointsWriterConfig& config, OGRCoordinateTransformationH& coord_trans, std::string& output_file_path);
     
     /**
      * Write both linestring and point features efficiently in a single pass
@@ -101,10 +102,10 @@ private:
      * @param neighboring_points_instance Reference to NeighboringPoints instance for vertex lookup
      * @return true if successful, false otherwise
      */
-    bool writeLinestringAndPointFeatures(void* linestring_dataset, void* linestring_layer, 
-                                        OGRCoordinateTransformation* coord_trans_linestring,
-                                        void* point_dataset, void* point_layer, 
-                                        OGRCoordinateTransformation* coord_trans_point,
+    bool writeLinestringAndPointFeatures(GDALDatasetH linestring_dataset, OGRLayerH linestring_layer, 
+                                        OGRCoordinateTransformationH coord_trans_linestring,
+                                        GDALDatasetH point_dataset, OGRLayerH point_layer, 
+                                        OGRCoordinateTransformationH coord_trans_point,
                                         const std::unordered_map<std::pair<size_t, size_t>, std::tuple<size_t, double, graph::MultiLineString>, graph::PairHash>& neighboring_points_results,
                                         const graph::NeighboringPoints& neighboring_points_instance);
     

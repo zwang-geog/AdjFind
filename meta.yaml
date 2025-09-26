@@ -1,5 +1,5 @@
 {% set name = "adjfind" %}
-{% set version = "1.0.1" %}
+{% set version = "0.0.1" %}
 
 package:
   name: {{ name|lower }}
@@ -9,46 +9,27 @@ source:
   git_url: https://github.com/zwang-geog/AdjFind.git
   git_tag: v{{ version }}
 
+channels:
+  - conda-forge
+  - defaults
+
 build:
-  number: 1
+  number: 0
   script: |
     mkdir build
     cd build
     
-    # Build with clean RPATH settings
+    # Simple cmake build - let conda handle RPATH automatically
     cmake .. \
       -DCMAKE_BUILD_TYPE=Release \
       -DCMAKE_INSTALL_PREFIX=$PREFIX \
-      -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
-      -DCMAKE_INSTALL_RPATH="\$ORIGIN/../lib" \
-      -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON \
-      -DCMAKE_INSTALL_RPATH_USE_LINK_PATH=OFF \
-      -DCMAKE_SKIP_BUILD_RPATH=ON
+      -DCMAKE_POSITION_INDEPENDENT_CODE=ON
     
-    cmake --build . --config Release -j{{ CPU_COUNT }}
+    cmake --build . --config Release -j1
     cmake --install .
-    
-    # Clean up RPATH using patchelf to ensure it's correct
-    if [[ "$target_platform" == linux-* ]]; then
-      # Install patchelf if not available
-      if ! command -v patchelf >/dev/null 2>&1; then
-        $CONDA_EXE install -y patchelf --yes -p $BUILD_PREFIX
-      fi
-      
-      # Force set clean RPATH, removing any build-time paths
-      $BUILD_PREFIX/bin/patchelf --set-rpath "\$ORIGIN/../lib" $PREFIX/bin/adjfind
-      
-      # Verify the fix
-      if command -v readelf >/dev/null 2>&1; then
-        echo "=== Clean RPATH verification ==="
-        readelf -d $PREFIX/bin/adjfind | grep -E "(RPATH|RUNPATH)"
-      fi
-    fi
   
-  binary_relocation: false
-  # Important: ensure run dependencies are included
-  run_exports:
-    - {{ pin_subpackage(name, max_pin="x.x") }}
+  # Let conda handle binary relocation (more reliable than manual RPATH)
+  binary_relocation: true
 
 requirements:
   build:
@@ -57,14 +38,11 @@ requirements:
     - git
     - {{ compiler('cxx') }}
     - {{ compiler('c') }}
-    - patchelf  # [linux]
   host:
-    - libgdal-core
-    - boost-cpp
+    - libgdal-core >=3.9.0,<3.10.0a0  # Build against GDAL 3.9.x only
+    - boost-cpp >= 1.82.0
   run:
-    - libgdal-core  # This MUST be included for the binary to work
-    - boost-cpp
-    # Let conda handle compiler libs automatically
+    - libgdal-core >=3.9.0,<4.0.0a0   # Runtime: support 3.9.x through 3.11.x
 
 test:
   commands:
