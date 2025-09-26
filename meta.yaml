@@ -1,0 +1,89 @@
+{% set name = "adjfind" %}
+{% set version = "1.0.1" %}
+
+package:
+  name: {{ name|lower }}
+  version: {{ version }}
+
+source:
+  git_url: https://github.com/zwang-geog/AdjFind.git
+  git_tag: v{{ version }}
+
+build:
+  number: 1
+  script: |
+    mkdir build
+    cd build
+    
+    # Build with clean RPATH settings
+    cmake .. \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_INSTALL_PREFIX=$PREFIX \
+      -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+      -DCMAKE_INSTALL_RPATH="\$ORIGIN/../lib" \
+      -DCMAKE_BUILD_WITH_INSTALL_RPATH=ON \
+      -DCMAKE_INSTALL_RPATH_USE_LINK_PATH=OFF \
+      -DCMAKE_SKIP_BUILD_RPATH=ON
+    
+    cmake --build . --config Release -j{{ CPU_COUNT }}
+    cmake --install .
+    
+    # Clean up RPATH using patchelf to ensure it's correct
+    if [[ "$target_platform" == linux-* ]]; then
+      # Install patchelf if not available
+      if ! command -v patchelf >/dev/null 2>&1; then
+        $CONDA_EXE install -y patchelf --yes -p $BUILD_PREFIX
+      fi
+      
+      # Force set clean RPATH, removing any build-time paths
+      $BUILD_PREFIX/bin/patchelf --set-rpath "\$ORIGIN/../lib" $PREFIX/bin/adjfind
+      
+      # Verify the fix
+      if command -v readelf >/dev/null 2>&1; then
+        echo "=== Clean RPATH verification ==="
+        readelf -d $PREFIX/bin/adjfind | grep -E "(RPATH|RUNPATH)"
+      fi
+    fi
+  
+  binary_relocation: false
+  # Important: ensure run dependencies are included
+  run_exports:
+    - {{ pin_subpackage(name, max_pin="x.x") }}
+
+requirements:
+  build:
+    - cmake >=3.16
+    - make
+    - git
+    - {{ compiler('cxx') }}
+    - {{ compiler('c') }}
+    - patchelf  # [linux]
+  host:
+    - libgdal-core
+    - boost-cpp
+  run:
+    - libgdal-core  # This MUST be included for the binary to work
+    - boost-cpp
+    # Let conda handle compiler libs automatically
+
+test:
+  commands:
+    - adjfind --help
+    - adjfind --version
+
+about:
+  home: https://github.com/zwang-geog/AdjFind
+  license: MIT
+  license_file: LICENSE
+  summary: CLI of specialized finding algorithms related to adjacency/proximity
+  description: |
+    The command-line tool supports three main modes:
+    • Road Segmentation Mode: Determines which service points (e.g., hydrants) are closest to each road segment using network distance, and optionally splits roads into discrete distance categories for service area analysis.
+    • Neighboring Points Mode: Identifies the nearest neighboring service points along a road network in each direction, calculating spacing distances between facilities like hydrants for regulatory compliance assessment.
+    • Structure Access Mode: Computes shortest unobstructed paths from building corners to road networks, finding the least accessible points on buildings for emergency response planning and fire code compliance.
+  doc_url: https://github.com/zwang-geog/AdjFind/blob/master/README.md
+  dev_url: https://github.com/zwang-geog/AdjFind
+
+extra:
+  recipe-maintainers:
+    - zwang-geog

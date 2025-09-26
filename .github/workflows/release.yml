@@ -15,7 +15,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake build-essential libgdal-dev libboost-all-dev nlohmann-json3-dev
+          sudo apt-get install -y cmake build-essential libgdal-dev libboost-all-dev
       
       - name: Build
         run: |
@@ -35,7 +35,7 @@ jobs:
       
       - name: Install dependencies
         run: |
-          brew install cmake gdal nlohmann-json
+          brew install cmake gdal
           
       - name: Install Boost via conda
         run: |
@@ -88,7 +88,7 @@ jobs:
       
       - name: Install dependencies
         run: |
-          .\vcpkg\vcpkg install gdal:x64-windows boost:x64-windows nlohmann-json:x64-windows --clean-after-build
+          .\vcpkg\vcpkg install gdal:x64-windows boost:x64-windows --clean-after-build
         
       - name: Configure CMake
         run: |

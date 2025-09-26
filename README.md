@@ -264,13 +264,15 @@ sudo make install
 
 ### Runtime Dependencies (for users)
 
-**GDAL must be available on the target system (If user has QGIS or geopandas installed, likely no further action is needed):**
+**For users downloading releases from GitHub Actions:**
+
+**Compatible GDAL must be available on the target system:**
 
 #### Linux:
 ```bash
-# Ubuntu/Debian (newest versions - recommended)
+# Ubuntu/Debian (runtime libraries)
 sudo apt update
-sudo apt install libgdal-dev
+sudo apt install gdal-bin
 
 # CentOS/RHEL
 sudo yum install gdal
@@ -280,12 +282,10 @@ sudo yum install gdal
 
 #### macOS:
 ```bash
-# Install newest versions (recommended)
-brew update
-brew install gdal boost
+# Install runtime libraries
+brew install gdal
 
-# Or install specific versions if needed
-# brew install gdal@3.4 boost@1.82
+# Note: Boost is header-only, no runtime installation needed
 ```
 
 #### Windows:
