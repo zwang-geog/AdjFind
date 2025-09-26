@@ -1,0 +1,67 @@
+{% set name = "adjfind" %}
+{% set version = "0.0.1" %}
+
+package:
+  name: {{ name|lower }}
+  version: {{ version }}
+
+source:
+  git_url: https://github.com/zwang-geog/AdjFind.git
+  git_tag: v{{ version }}
+
+channels:
+  - conda-forge
+  - defaults
+
+build:
+  number: 0
+  script: |
+    mkdir build
+    cd build
+    
+    # Simple cmake build - let conda handle RPATH automatically
+    cmake .. \
+      -DCMAKE_BUILD_TYPE=Release \
+      -DCMAKE_INSTALL_PREFIX=$PREFIX \
+      -DCMAKE_POSITION_INDEPENDENT_CODE=ON
+    
+    cmake --build . --config Release -j1
+    cmake --install .
+  
+  # Let conda handle binary relocation (more reliable than manual RPATH)
+  binary_relocation: true
+
+requirements:
+  build:
+    - cmake >=3.16
+    - make
+    - git
+    - {{ compiler('cxx') }}
+    - {{ compiler('c') }}
+  host:
+    - libgdal-core >=3.9.0,<3.10.0a0  # Build against GDAL 3.9.x only
+    - boost-cpp >= 1.82.0
+  run:
+    - libgdal-core >=3.9.0,<4.0.0a0   # Runtime: support 3.9.x through 3.11.x
+
+test:
+  commands:
+    - adjfind --help
+    - adjfind --version
+
+about:
+  home: https://github.com/zwang-geog/AdjFind
+  license: MIT
+  license_file: LICENSE
+  summary: CLI of specialized finding algorithms related to adjacency/proximity
+  description: |
+    The command-line tool supports three main modes:
+    • Road Segmentation Mode: Determines which service points (e.g., hydrants) are closest to each road segment using network distance, and optionally splits roads into discrete distance categories for service area analysis.
+    • Neighboring Points Mode: Identifies the nearest neighboring service points along a road network in each direction, calculating spacing distances between facilities like hydrants for regulatory compliance assessment.
+    • Structure Access Mode: Computes shortest unobstructed paths from building corners to road networks, finding the least accessible points on buildings for emergency response planning and fire code compliance.
+  doc_url: https://github.com/zwang-geog/AdjFind/blob/master/README.md
+  dev_url: https://github.com/zwang-geog/AdjFind
+
+extra:
+  recipe-maintainers:
+    - zwang-geog

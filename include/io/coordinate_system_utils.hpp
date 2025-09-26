@@ -3,6 +3,7 @@
 
 #include <string>
 #include <gdal.h>
+#include <ogr_api.h>
 #include <ogr_spatialref.h>
 
 namespace adjfind {
@@ -30,51 +31,51 @@ public:
     
     /**
      * Get dataset extent and calculate center point
-     * @param dataset GDAL dataset
+     * @param dataset GDAL dataset handle
      * @param center_x Output center longitude
      * @param center_y Output center latitude
      * @return true if successful, false otherwise
      */
-    static bool getDatasetCenter(void* dataset, double& center_x, double& center_y);
+    static bool getDatasetCenter(GDALDatasetH dataset, double& center_x, double& center_y);
     
     /**
      * Check if coordinate system is EPSG:4326 (WGS84)
-     * @param spatial_ref OGRSpatialReference object
+     * @param spatial_ref OGRSpatialReference handle
      * @return true if EPSG:4326, false otherwise
      */
-    static bool isEPSG4326(OGRSpatialReference* spatial_ref);
+    static bool isEPSG4326(OGRSpatialReferenceH spatial_ref);
     
     /**
      * Create coordinate transformation for UTM reprojection
-     * @param source_srs Source spatial reference
+     * @param source_srs Source spatial reference handle
      * @param target_epsg Target EPSG code for UTM zone
-     * @return Coordinate transformation object (caller owns the pointer)
+     * @return Coordinate transformation handle (caller owns the handle)
      */
-    static OGRCoordinateTransformation* createUTMTransformation(OGRSpatialReference* source_srs, int target_epsg);
+    static OGRCoordinateTransformationH createUTMTransformation(OGRSpatialReferenceH source_srs, int target_epsg);
     
     /**
      * Get coordinate system as WKT string
-     * @param dataset GDAL dataset
+     * @param dataset GDAL dataset handle
      * @return WKT string of coordinate system
      */
-    static std::string getCoordinateSystemWKT(void* dataset);
+    static std::string getCoordinateSystemWKT(GDALDatasetH dataset);
     
     /**
      * Get coordinate system as WKT string from a specific layer
-     * @param dataset GDAL dataset
+     * @param dataset GDAL dataset handle
      * @param layer_index Layer index to get coordinate system from
      * @return WKT string of coordinate system
      */
-    static std::string getCoordinateSystemWKT(void* dataset, int layer_index);
+    static std::string getCoordinateSystemWKT(GDALDatasetH dataset, int layer_index);
     
     /**
      * Compare two coordinate systems
-     * @param spatial_ref1 First coordinate system
-     * @param spatial_ref2 Second coordinate system
+     * @param spatial_ref1 First coordinate system handle
+     * @param spatial_ref2 Second coordinate system handle
      * @return true if they are the same, false otherwise
      */
-    static bool compareCoordinateSystems(OGRSpatialReference* spatial_ref1, 
-                                       OGRSpatialReference* spatial_ref2);
+    static bool compareCoordinateSystems(OGRSpatialReferenceH spatial_ref1, 
+                                       OGRSpatialReferenceH spatial_ref2);
 
 private:
     // Disable instantiation

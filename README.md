@@ -8,6 +8,23 @@ This repository contains the source code for the AdjFind project, a C++ applicat
 
 • **Structure Access Mode**: Computes shortest unobstructed paths from building corners to road networks, finding the least accessible points on buildings for emergency response planning and fire code compliance.
 
+## Quick Installation (macOS)
+
+The easiest way to install AdjFind on macOS is using Homebrew:
+
+```bash
+# Add the repository as a tap
+brew tap zwang-geog/AdjFind https://github.com/zwang-geog/AdjFind.git
+
+# Install from the tap
+brew install zwang-geog/adjfind/adjfind
+```
+
+Then run:
+```bash
+adjfind --help
+```
+
 ## Supported Algorithms/Modes
 
 ### 1. Split road to service area or discrete distance brackets/categories (`--mode road-segmentation`)
@@ -126,13 +143,15 @@ In the following figure, the shortest unobstructed paths to the building corner 
 The output has two datasets. The first is a linestring dataset that has exact name as specified in output-file parameter, and it has path geometry of both corner points and least-accessible-point. The path geometry does not include any road network component, and it ends at the road access point. It has following fields:
 - `row_id` - unique identifier of each row
 - `polygon_feature_id` - the path's corresponding building's ID from the input data. Each input polygon feature has multiple rows corresponding to different paths in the output
-- `path_type` - One of "BUILDING_CORNER" or "LEAST_ACCESSIBLE_POINT"
+- `path_type` - One of "BUILDING_CORNER" or "LEAST_ACCESSIBLE_POINT" or "NOT_FOUND" (If no path found, access_distance, assigned_point_feature_id, distance_to_assigned_point, snapped_road_feature_id will be null)
 - `assigned_point_feature_id` - the ID of the point in point dataset that is closest to the road access point of the path
 - `snapped_road_feature_id` - the ID of the road linestring that the road access point is on (the road linestring that the shortest unobstructed path connects to)
 - `distance_to_assigned_point` - the distance from building corner point or least-accessible-point to the point feature with assigned_point_feature_id, and it consists of both network distance and access distance
 - `access-distance` - the distance from building corner point or least-accessible-point to the road access point; it is the length of the output path geometry
 
 The second output dataset is a point dataset with "_least_accessible_point" appended to the end of the specified output file name. It has one row for each input polygon, and it has same fields as the linestring dataset excluding path_type field.
+
+**WARNIHG: If a building overlaps with a road linestring, some of its corner points may not be able to find a path (the least-accessible point identified will thus be incorrect). If a building's corner point's closest point is on the portion of the road linestring that overlaps with another building, it may also not able to find a path. Road-building intersection should be avoided in the input data (building-building overlap is also recommended to be minimized if possible)**
 
 **Required Arguments:**
 - `--road-file-path <path>` - Path to the road network file
@@ -178,7 +197,7 @@ The second output dataset is a point dataset with "_least_accessible_point" appe
 
 * Points do not need to be at network intersection nor on the road linestring. A Euclidean-distance based snapping will be performed to snap points to their nearest road edges. However, it is still recommended to make sure the point is closest to the desired road linestring manually by user.
 
-## Building and Installation
+## Building and Installation (for developers)
 
 ### Prerequisites
 
@@ -188,24 +207,35 @@ Before building this project, ensure you have the following dependencies install
 - **C++ Compiler** with C++17 support (Clang 16.0.0)
 - **GDAL** (version 3.10.2) - for data IO
 - **Boost** (version 1.82.0) - for boost geometry library
-- **nlohmann_json** (version 3.12.0) - for parameter parsing
+- **nlohmann_json** (version 3.12.0) - for parameter parsing (WASM builds only)
 
 ### Installing Dependencies
+
+**Note on Linking Strategy:**
+- **GDAL**: Dynamically linked - must be installed on the target system
+- **Boost**: Mixed approach - geometry (header-only), system/filesystem (compiled but statically linked) - no runtime installation needed  
+- **nlohmann_json**: Header-only library - included in the binary (WASM builds only)
+- **Standard libraries**: Partially statically linked for better compatibility
 
 #### On Ubuntu/Debian:
 ```bash
 sudo apt update
-sudo apt install cmake build-essential libgdal-dev
+sudo apt install cmake build-essential libgdal-dev libboost-all-dev
 ```
 
 #### On macOS (using Homebrew):
 ```bash
-brew install cmake gdal
+brew install cmake gdal boost
 ```
 
 #### On Windows:
+- Install [Visual Studio 2022 Community](https://visualstudio.microsoft.com/downloads/) (free)
 - Install [CMake](https://cmake.org/download/)
-- Install [GDAL](https://gdal.org/download.html) or use [OSGeo4W](https://trac.osgeo.org/osgeo4w/)
+- Install dependencies via vcpkg:
+  ```bash
+  winget install Microsoft.vcpkg
+  vcpkg install gdal:x64-windows boost:x64-windows
+  ```
 
 ### Building the Project
 
@@ -231,6 +261,36 @@ cmake --build . --config Release  # On Windows
 ```bash
 sudo make install
 ```
+
+### Runtime Dependencies (for users)
+
+**For users downloading releases from GitHub Actions:**
+
+**Compatible GDAL must be available on the target system:**
+
+#### Linux:
+```bash
+# Ubuntu/Debian (runtime libraries)
+sudo apt update
+sudo apt install gdal-bin
+
+# CentOS/RHEL
+sudo yum install gdal
+
+# Note: Boost is header-only, no runtime installation needed
+```
+
+#### macOS:
+```bash
+# Install runtime libraries
+brew install gdal
+
+# Note: Boost is header-only, no runtime installation needed
+```
+
+#### Windows:
+- GDAL is included with the vcpkg installation
+- Ensure the vcpkg environment is properly configured
 
 ## Disclaimer
 

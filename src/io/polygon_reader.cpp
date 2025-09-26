@@ -1,6 +1,8 @@
 #include "io/polygon_reader.hpp"
+#include "io/coordinate_system_utils.hpp"
 #include "graph/adj_graph.hpp"
-#include <ogrsf_frmts.h>
+#include <gdal.h>
+#include <ogr_api.h>
 #include <iostream>
 #include <sstream>
 #include <algorithm>
@@ -16,7 +18,7 @@ namespace bg = boost::geometry;
 namespace bgi = boost::geometry::index;
 
 PolygonReader::PolygonReader(const PolygonReaderConfig& config)
-    : config_(config), coordinate_transformation_(nullptr), coordinate_system_epsg_(-1) {
+    : config_(config), dataset_(nullptr), coordinate_transformation_(nullptr), coordinate_system_epsg_(-1) {
     initGDAL();
 }
 
@@ -26,8 +28,8 @@ PolygonReader::~PolygonReader() {
     }
     
     if (dataset_) {
-        GDALDataset* ds = dataset_.release();
-        GDALClose(ds);
+        GDALClose(dataset_);
+        dataset_ = nullptr;
     }
 }
 
@@ -37,13 +39,12 @@ bool PolygonReader::read() {
     
     // Close any existing dataset
     if (dataset_) {
-        GDALDataset* ds = dataset_.release();
-        GDALClose(ds);
+        GDALClose(dataset_);
+        dataset_ = nullptr;
     }
 
     // Open the dataset
-    dataset_.reset(static_cast<GDALDataset*>(
-        GDALOpenEx(config_.file_path.c_str(), GDAL_OF_VECTOR, nullptr, nullptr, nullptr)));
+    dataset_ = GDALOpenEx(config_.file_path.c_str(), GDAL_OF_VECTOR, nullptr, nullptr, nullptr);
     
     if (!dataset_) {
         std::cerr << "Failed to open polygon file: " << config_.file_path << std::endl;
@@ -70,24 +71,24 @@ const graph::PolygonFeature& PolygonReader::getPolygonFeature(size_t index) cons
     return polygons_[index];
 }
 
-std::optional<OGRSpatialReference> PolygonReader::getSpatialRef() const {
+std::optional<OGRSpatialReferenceH> PolygonReader::getSpatialRef() const {
     if (!dataset_) {
         return std::nullopt;
     }
     
-    OGRLayer* layer = dataset_->GetLayer(config_.layer_index);
+    OGRLayerH layer = GDALDatasetGetLayer(dataset_, config_.layer_index);
     if (!layer) {
         return std::nullopt;
     }
     
-    OGRSpatialReference* spatial_ref = layer->GetSpatialRef();
+    OGRSpatialReferenceH spatial_ref = OGR_L_GetSpatialRef(layer);
     if (!spatial_ref) {
         return std::nullopt;
     }
     
     // Clone the spatial reference
-    OGRSpatialReference* cloned_ref = spatial_ref->Clone();
-    return std::optional<OGRSpatialReference>(*cloned_ref);
+    OGRSpatialReferenceH cloned_ref = OSRClone(spatial_ref);
+    return std::optional<OGRSpatialReferenceH>(cloned_ref);
 }
 
 void PolygonReader::populateSnappableRoadIds(graph::AdjGraph& adj_graph) {
@@ -244,42 +245,42 @@ void PolygonReader::initGDAL() {
 }
 
 bool PolygonReader::readFeatures() {
-    OGRLayer* layer = dataset_->GetLayer(config_.layer_index);
+    OGRLayerH layer = GDALDatasetGetLayer(dataset_, config_.layer_index);
     if (!layer) {
         std::cerr << "Error: Failed to get layer " << config_.layer_index << std::endl;
         return false;
     }
     
-    layer->ResetReading();
-    OGRFeature* feature;
+    OGR_L_ResetReading(layer);
+    OGRFeatureH feature;
     
-    while ((feature = layer->GetNextFeature()) != nullptr) {
-        OGRGeometry* geometry = feature->GetGeometryRef();
+    while ((feature = OGR_L_GetNextFeature(layer)) != nullptr) {
+        OGRGeometryH geometry = OGR_F_GetGeometryRef(feature);
         if (!geometry) {
-            OGRFeature::DestroyFeature(feature);
+            OGR_F_Destroy(feature);
             continue;
         }
         
         // Check if geometry is a supported polygon type
-        OGRwkbGeometryType geom_type = geometry->getGeometryType();
+        OGRwkbGeometryType geom_type = OGR_G_GetGeometryType(geometry);
         if (geom_type != wkbPolygon && geom_type != wkbPolygon25D &&
             geom_type != wkbMultiPolygon && geom_type != wkbMultiPolygon25D) {
-            std::cout << "Warning: Skipping feature " << feature->GetFID() 
+            std::cout << "Warning: Skipping feature " << OGR_F_GetFID(feature) 
                      << " with unsupported geometry type: " << OGRGeometryTypeToName(geom_type) << std::endl;
-            OGRFeature::DestroyFeature(feature);
+            OGR_F_Destroy(feature);
             continue;
         }
         
         // Transform geometry if needed
         if (!transformGeometry(geometry)) {
-            std::cerr << "Warning: Failed to transform geometry for feature " << feature->GetFID() 
+            std::cerr << "Warning: Failed to transform geometry for feature " << OGR_F_GetFID(feature) 
                      << ". Skipping." << std::endl;
-            OGRFeature::DestroyFeature(feature);
+            OGR_F_Destroy(feature);
             continue;
         }
         
         // Get feature ID
-        size_t feature_id = feature->GetFID();
+        size_t feature_id = OGR_F_GetFID(feature);
         if (!config_.id_field.empty()) {
             auto id_value = getFieldValueAsSizeT(feature, config_.id_field);
             if (id_value.has_value()) {
@@ -308,11 +309,10 @@ bool PolygonReader::readFeatures() {
             processSinglePolygon(geometry, feature_id, is_obstacle_only, snappable_road_ids);
         } else if (geom_type == wkbMultiPolygon || geom_type == wkbMultiPolygon25D) {
             // Multipolygon - use only the first polygon
-            OGRMultiPolygon* multipolygon = static_cast<OGRMultiPolygon*>(geometry);
-            if (multipolygon->getNumGeometries() > 0) {
-                OGRGeometry* first_polygon = multipolygon->getGeometryRef(0);
-                if (first_polygon && (first_polygon->getGeometryType() == wkbPolygon || 
-                                     first_polygon->getGeometryType() == wkbPolygon25D)) {
+            if (OGR_G_GetGeometryCount(geometry) > 0) {
+                OGRGeometryH first_polygon = OGR_G_GetGeometryRef(geometry, 0);
+                if (first_polygon && (OGR_G_GetGeometryType(first_polygon) == wkbPolygon || 
+                                     OGR_G_GetGeometryType(first_polygon) == wkbPolygon25D)) {
                     processSinglePolygon(first_polygon, feature_id, is_obstacle_only, snappable_road_ids);
                 } else {
                     std::cout << "Warning: Invalid first polygon in multipolygon feature " << feature_id << ". Skipping." << std::endl;
@@ -322,7 +322,7 @@ bool PolygonReader::readFeatures() {
             }
         }
         
-        OGRFeature::DestroyFeature(feature);
+        OGR_F_Destroy(feature);
     }
     
     std::cout << "Successfully read " << polygons_.size() << " polygon features" << std::endl;
@@ -356,47 +356,47 @@ void PolygonReader::buildSpatialIndex() {
     std::cout << "Built spatial index for " << rtree_values.size() << " polygons" << std::endl;
 }
 
-std::optional<size_t> PolygonReader::getFieldValueAsSizeT(const OGRFeature* feature,
+std::optional<size_t> PolygonReader::getFieldValueAsSizeT(const OGRFeatureH feature,
                                                           const std::string& field_name) const {
-    int field_index = feature->GetFieldIndex(field_name.c_str());
+    int field_index = OGR_F_GetFieldIndex(feature, field_name.c_str());
     if (field_index == -1) {
         return std::nullopt;
     }
     
-    if (feature->IsFieldNull(field_index)) {
+    if (OGR_F_IsFieldNull(feature, field_index)) {
         return std::nullopt;
     }
     
-    return static_cast<size_t>(feature->GetFieldAsInteger64(field_index));
+    return static_cast<size_t>(OGR_F_GetFieldAsInteger64(feature, field_index));
 }
 
-bool PolygonReader::getFieldValueAsBool(const OGRFeature* feature,
+bool PolygonReader::getFieldValueAsBool(const OGRFeatureH feature,
                                         const std::string& field_name,
                                         bool default_value) const {
-    int field_index = feature->GetFieldIndex(field_name.c_str());
+    int field_index = OGR_F_GetFieldIndex(feature, field_name.c_str());
     if (field_index == -1) {
         return default_value;
     }
     
-    if (feature->IsFieldNull(field_index)) {
+    if (OGR_F_IsFieldNull(feature, field_index)) {
         return default_value;
     }
     
-    return feature->GetFieldAsInteger(field_index) != 0;
+    return OGR_F_GetFieldAsInteger(feature, field_index) != 0;
 }
 
-std::string PolygonReader::getFieldValueAsString(const OGRFeature* feature,
+std::string PolygonReader::getFieldValueAsString(const OGRFeatureH feature,
                                                  const std::string& field_name) const {
-    int field_index = feature->GetFieldIndex(field_name.c_str());
+    int field_index = OGR_F_GetFieldIndex(feature, field_name.c_str());
     if (field_index == -1) {
         return "";
     }
     
-    if (feature->IsFieldNull(field_index)) {
+    if (OGR_F_IsFieldNull(feature, field_index)) {
         return "";
     }
     
-    const char* value = feature->GetFieldAsString(field_index);
+    const char* value = OGR_F_GetFieldAsString(feature, field_index);
     return value ? std::string(value) : "";
 }
 
@@ -423,15 +423,15 @@ std::vector<size_t> PolygonReader::parseRoadIds(const std::string& road_ids_str)
     return road_ids;
 }
 
-graph::Polygon PolygonReader::convertOGRToPolygon(const OGRGeometry* ogr_geom) const {
-    if (ogr_geom->getGeometryType() != wkbPolygon && ogr_geom->getGeometryType() != wkbPolygon25D) {
+graph::Polygon PolygonReader::convertOGRToPolygon(const OGRGeometryH ogr_geom) const {
+    if (OGR_G_GetGeometryType(ogr_geom) != wkbPolygon && OGR_G_GetGeometryType(ogr_geom) != wkbPolygon25D) {
         throw std::runtime_error("Invalid geometry type for polygon conversion");
     }
     
-    const OGRPolygon* ogr_polygon = static_cast<const OGRPolygon*>(ogr_geom);
-    const OGRLinearRing* exterior_ring = ogr_polygon->getExteriorRing();
+    // Get exterior ring
+    OGRGeometryH exterior_ring = OGR_G_GetGeometryRef(ogr_geom, 0);
     
-    if (!exterior_ring || exterior_ring->getNumPoints() < 3) {
+    if (!exterior_ring || OGR_G_GetPointCount(exterior_ring) < 3) {
         throw std::runtime_error("Invalid exterior ring for polygon");
     }
     
@@ -439,9 +439,10 @@ graph::Polygon PolygonReader::convertOGRToPolygon(const OGRGeometry* ogr_geom) c
     graph::Polygon boost_polygon;
     auto& outer_ring = boost_polygon.outer();
     
-    for (int i = 0; i < exterior_ring->getNumPoints(); ++i) {
-        double x = exterior_ring->getX(i);
-        double y = exterior_ring->getY(i);
+    int num_points = OGR_G_GetPointCount(exterior_ring);
+    for (int i = 0; i < num_points; ++i) {
+        double x, y, z;
+        OGR_G_GetPoint(exterior_ring, i, &x, &y, &z);
         
         // Use raw coordinates to preserve full precision
         outer_ring.push_back(graph::Point(x, y));
@@ -499,13 +500,13 @@ std::vector<graph::PolygonFeature> PolygonReader::queryPolygonRTree(const graph:
     return crossed_obstacles;
 }
 
-bool PolygonReader::transformGeometry(OGRGeometry* geom) const {
+bool PolygonReader::transformGeometry(OGRGeometryH geom) const {
     if (!coordinate_transformation_ || !geom) {
         return true; // No transformation needed or no geometry
     }
     
     // Transform the geometry in-place
-    if (!geom->transform(coordinate_transformation_)) {
+    if (OGR_G_Transform(geom, coordinate_transformation_) != OGRERR_NONE) {
         std::cerr << "Warning: Failed to transform geometry coordinates" << std::endl;
         return false;
     }
@@ -519,58 +520,93 @@ bool PolygonReader::handleCoordinateSystem() {
     }
     
     // Get coordinate system WKT from the specified layer
-    coordinate_system_wkt_ = CoordinateSystemUtils::getCoordinateSystemWKT(dataset_.get(), config_.layer_index);
+    OGRLayerH layer = GDALDatasetGetLayer(dataset_, config_.layer_index);
+    if (!layer) {
+        std::cerr << "Error: Could not get layer for coordinate system detection" << std::endl;
+        return false;
+    }
+    
+    OGRSpatialReferenceH layer_srs = OGR_L_GetSpatialRef(layer);
+    if (layer_srs) {
+        char* wkt = nullptr;
+        OSRExportToWkt(layer_srs, &wkt);
+        if (wkt) {
+            coordinate_system_wkt_ = wkt;
+            CPLFree(wkt);
+        }
+    } else {
+        coordinate_system_wkt_ = "";
+    }
     
     // Get spatial reference
-    OGRSpatialReference spatial_ref;
+    OGRSpatialReferenceH spatial_ref = OSRNewSpatialReference(nullptr);
     if (!coordinate_system_wkt_.empty()) {
-        if (spatial_ref.importFromWkt(coordinate_system_wkt_.c_str()) != OGRERR_NONE) {
+        char* wkt_copy = const_cast<char*>(coordinate_system_wkt_.c_str());
+        if (OSRImportFromWkt(spatial_ref, &wkt_copy) != OGRERR_NONE) {
             std::cerr << "Warning: Failed to parse coordinate system WKT" << std::endl;
             coordinate_system_epsg_ = -1;
+            OSRDestroySpatialReference(spatial_ref);
             return true; // Continue anyway
         }
     } else {
         // No coordinate system info
         coordinate_system_epsg_ = -1;
+        OSRDestroySpatialReference(spatial_ref);
         return true;
     }
     
     // Check if it's EPSG:4326
-    if (CoordinateSystemUtils::isEPSG4326(&spatial_ref)) {
+    bool is_epsg4326 = false;
+    const char* authority_name = OSRGetAuthorityName(spatial_ref, nullptr);
+    const char* authority_code = OSRGetAuthorityCode(spatial_ref, nullptr);
+    
+    if (authority_name && authority_code && std::string(authority_name) == "EPSG") {
+        int epsg_code = std::stoi(authority_code);
+        if (epsg_code == 4326) {
+            is_epsg4326 = true;
+        }
+    }
+    
+    if (is_epsg4326) {
         std::cout << "Polygon dataset is in EPSG:4326 (WGS84)" << std::endl;
         coordinate_system_epsg_ = 4326;
         
         // Get dataset center for UTM zone determination
         double center_x, center_y;
-        if (CoordinateSystemUtils::getDatasetCenter(dataset_.get(), center_x, center_y)) {
+        if (CoordinateSystemUtils::getDatasetCenter(dataset_, center_x, center_y)) {
             int utm_epsg = CoordinateSystemUtils::determineUTMEPSG(center_x, center_y);
             std::cout << "Dataset center: (" << center_x << ", " << center_y << ")" << std::endl;
             std::cout << "Recommended UTM zone: EPSG:" << utm_epsg << std::endl;
             
             // Create coordinate transformation for UTM reprojection
-            coordinate_transformation_ = CoordinateSystemUtils::createUTMTransformation(&spatial_ref, utm_epsg);
+            coordinate_transformation_ = CoordinateSystemUtils::createUTMTransformation(spatial_ref, utm_epsg);
             if (coordinate_transformation_) {
                 // Update coordinate system info
                 coordinate_system_epsg_ = utm_epsg;
-                OGRSpatialReference target_srs;
-                target_srs.importFromEPSG(utm_epsg);
-                coordinate_system_wkt_ = target_srs.exportToWkt();
+                OGRSpatialReferenceH target_srs = OSRNewSpatialReference(nullptr);
+                OSRImportFromEPSG(target_srs, utm_epsg);
+                char *wkt = nullptr;
+                OSRExportToWkt(target_srs, &wkt);
+                if (wkt) {
+                    coordinate_system_wkt_ = wkt;
+                    CPLFree(wkt);
+                }
+                OSRDestroySpatialReference(target_srs);
                 std::cout << "Successfully created UTM transformation to EPSG:" << utm_epsg << std::endl;
             } else {
                 std::cerr << "ERROR: Failed to create coordinate transformation for EPSG:4326 to UTM zone EPSG:" << utm_epsg << std::endl;
                 std::cerr << "Boost Geometry requires cartesian coordinates. Aborting program." << std::endl;
+                OSRDestroySpatialReference(spatial_ref);
                 return false;
             }
         } else {
             std::cerr << "ERROR: Could not determine dataset center for UTM zone calculation" << std::endl;
             std::cerr << "Boost Geometry requires cartesian coordinates. Aborting program." << std::endl;
+            OSRDestroySpatialReference(spatial_ref);
             return false;
         }
     } else {
         // Not EPSG:4326, get EPSG code if available
-        const char* authority_name = spatial_ref.GetAuthorityName(nullptr);
-        const char* authority_code = spatial_ref.GetAuthorityCode(nullptr);
-        
         if (authority_name && authority_code && std::string(authority_name) == "EPSG") {
             coordinate_system_epsg_ = std::stoi(authority_code);
             std::cout << "Polygon dataset coordinate system: EPSG:" << coordinate_system_epsg_ << std::endl;
@@ -580,6 +616,7 @@ bool PolygonReader::handleCoordinateSystem() {
         }
     }
     
+    OSRDestroySpatialReference(spatial_ref);
     return true;
 }
 
@@ -614,7 +651,7 @@ std::optional<graph::Polygon> PolygonReader::computeShrinkGeometry(const graph::
     return std::nullopt;
 }
 
-void PolygonReader::processSinglePolygon(OGRGeometry* geometry, size_t feature_id, bool is_obstacle_only, 
+void PolygonReader::processSinglePolygon(OGRGeometryH geometry, size_t feature_id, bool is_obstacle_only, 
                                         const std::vector<size_t>& snappable_road_ids) {
     
     // Convert geometry to boost geometry polygon

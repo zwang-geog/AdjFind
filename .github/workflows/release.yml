@@ -1,0 +1,136 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:  # Enables manual trigger from GitHub Actions UI
+
+jobs:
+  build-linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y cmake build-essential libgdal-dev libboost-all-dev
+      
+      - name: Build
+        run: |
+          chmod +x scripts/build.sh
+          ./scripts/build.sh --build-type Release
+      
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: adjfind-linux
+          path: build/adjfind-*.tar.gz
+
+  build-macos:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Install dependencies
+        run: |
+          brew install cmake gdal
+          
+      - name: Install Boost via conda
+        run: |
+          # Install miniconda
+          curl -L -O "https://github.com/conda-forge/miniforge/releases/latest/download/Miniforge3-MacOSX-arm64.sh"
+          bash Miniforge3-MacOSX-arm64.sh -b -p $HOME/miniforge3
+          source $HOME/miniforge3/bin/activate
+          
+          # Install Boost via conda
+          conda install -c conda-forge boost-cpp -y
+          
+          # Add conda paths to environment
+          echo "CONDA_PREFIX=$HOME/miniforge3" >> $GITHUB_ENV
+          echo "CMAKE_PREFIX_PATH=$HOME/miniforge3" >> $GITHUB_ENV
+      
+      - name: Build
+        run: |
+          chmod +x scripts/build.sh
+          ./scripts/build.sh --build-type Release
+      
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: adjfind-macos
+          path: build/adjfind-*.tar.gz
+
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Add MSBuild to PATH
+        uses: microsoft/setup-msbuild@v1.1
+      
+      - name: Setup vcpkg
+        run: |
+          git clone https://github.com/Microsoft/vcpkg.git
+          .\vcpkg\bootstrap-vcpkg.bat
+          .\vcpkg\vcpkg integrate install
+      
+      - name: Cache vcpkg packages
+        uses: actions/cache@v3
+        with:
+          path: |
+            ${{ github.workspace }}/vcpkg/installed
+            ${{ github.workspace }}/vcpkg/packages
+          key: vcpkg-${{ runner.os }}-${{ hashFiles('**/vcpkg.json') }}
+          restore-keys: |
+            vcpkg-${{ runner.os }}-
+      
+      - name: Install dependencies
+        run: |
+          .\vcpkg\vcpkg install gdal:x64-windows boost:x64-windows --clean-after-build
+        
+      - name: Configure CMake
+        run: |
+          mkdir build
+          cd build
+          cmake .. -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake -DCMAKE_BUILD_TYPE=Release -A x64
+        
+      - name: Build
+        run: |
+          cd build
+          cmake --build . --config Release
+        
+      - name: Create package
+        run: |
+          cd build
+          cpack -G ZIP -C Release
+        
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: adjfind-windows
+          path: build/adjfind-*.zip
+
+  create-release:
+    needs: [build-linux, build-macos, build-windows]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write      # This is required for creating releases
+      id-token: write     # This is required for GitHub token authentication
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          files: |
+            adjfind-linux/*
+            adjfind-macos/*
+            adjfind-windows/*
+          generate_release_notes: true    # Automatically generate release notes from commits
+          draft: false                    # Create a published release
+          prerelease: false              # Mark as full release, not pre-release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

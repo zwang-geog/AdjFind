@@ -1,13 +1,21 @@
 cmake_minimum_required(VERSION 3.16)
-project(adjfind)
+project(adjfind VERSION 0.0.1)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+# Set policies for modern CMake
+if(POLICY CMP0167)
+    cmake_policy(SET CMP0167 NEW)
+endif()
+
+if(POLICY CMP0144)
+    cmake_policy(SET CMP0144 NEW)
+endif()
+
 # Find required packages
-find_package(Boost REQUIRED COMPONENTS system filesystem)
+find_package(Boost REQUIRED)
 find_package(GDAL REQUIRED)
-find_package(nlohmann_json REQUIRED)
 
 # Include directories
 include_directories(include)
@@ -49,17 +57,22 @@ set(HEADERS
 # Create executable
 add_executable(adjfind ${SOURCES} ${HEADERS})
 
-# Link libraries
+# Link libraries using modern CMake targets
 target_link_libraries(adjfind
     PRIVATE
-    ${GDAL_LIBRARIES}
-    Boost::system
-    Boost::filesystem
-    nlohmann_json::nlohmann_json
+    GDAL::GDAL
+    Boost::boost
 )
 
-# Include directories for GDAL
-target_include_directories(adjfind PRIVATE ${GDAL_INCLUDE_DIRS})
+# Enable packaging
+include(CPack)
+set(CPACK_PACKAGE_VERSION ${PROJECT_VERSION})
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "AdjFind - Transportation Network Algorithms")
+set(CPACK_PACKAGE_VENDOR "Zifan Wang")
+set(CPACK_PACKAGE_DESCRIPTION_FILE "${CMAKE_CURRENT_SOURCE_DIR}/README.md")
+set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
 
-# Compiler flags
-target_compile_definitions(adjfind PRIVATE ${GDAL_DEFINITIONS}) 
+# Installation configuration
+install(TARGETS adjfind DESTINATION bin)
+install(FILES README.md LICENSE DESTINATION share/adjfind)
+install(DIRECTORY assets DESTINATION share/adjfind)

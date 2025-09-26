@@ -6,6 +6,7 @@
 #include <tuple>
 #include <limits>
 #include <unordered_set>
+#include <optional>
 #include <boost/geometry.hpp>
 #include <boost/geometry/geometries/point.hpp>
 #include <boost/geometry/geometries/linestring.hpp>
@@ -270,6 +271,54 @@ struct PairHash {
 };
 
 /**
+ * Structure representing a vertex in the polygon split graph
+ */
+ struct PolygonSplitGraphVertex {
+    Point location;
+    size_t vertex_id;
+    bool is_boundary_vertex;
+    
+    PolygonSplitGraphVertex(const Point& loc, size_t id, bool is_boundary = true) 
+        : location(loc), vertex_id(id), is_boundary_vertex(is_boundary) {}
+};
+
+/**
+ * Structure representing an edge in the polygon split graph
+ */
+struct PolygonSplitGraphEdge {
+    size_t from_vertex;
+    size_t to_vertex;
+    bool is_boundary_edge;
+    
+    PolygonSplitGraphEdge(size_t from, size_t to, bool is_boundary = true) 
+        : from_vertex(from), to_vertex(to), is_boundary_edge(is_boundary) {}
+};
+
+/**
+ * Structure representing a pair of vertices for polygon split edge tracking
+ */
+struct PolygonSplitEdgePair {
+    size_t vertex1;
+    size_t vertex2;
+    
+    PolygonSplitEdgePair(size_t v1, size_t v2) 
+        : vertex1(std::min(v1, v2)), vertex2(std::max(v1, v2)) {}
+    
+    bool operator==(const PolygonSplitEdgePair& other) const {
+        return vertex1 == other.vertex1 && vertex2 == other.vertex2;
+    }
+};
+
+/**
+ * Hash function for PolygonSplitEdgePair
+ */
+struct PolygonSplitEdgePairHash {
+    std::size_t operator()(const PolygonSplitEdgePair& pair) const {
+        return std::hash<size_t>()(pair.vertex1) ^ (std::hash<size_t>()(pair.vertex2) << 1);
+    }
+};
+
+/**
  * Enumeration for different types of convex path results
  */
 enum class ConvexPathResultType {
@@ -301,21 +350,6 @@ struct ConvexPathResult {
         : path_geometry(geometry), edge_indices(edges), total_length(total_len), objective_distance(objective_dist), path_found(true),
           nearest_point_vertex_position_index(nearest_point_idx), edge_index(edge_idx),
           start_point_type(ConvexPathResultType::NOT_FOUND) {}
-};
-
-/**
- * Structure representing intersection information for polygon splitting
- */
-struct PolygonSplittingIntersectionInfo {
-    Point from_point;                    // First point of the intersection linestring
-    Point to_point;          // Last point of the intersection linestring
-    size_t from_crossed_edge_index;      // Index of the crossed polygon edge corresponding to from_point
-    size_t to_crossed_edge_index;        // Index of the crossed polygon edge corresponding to to_point
-    size_t from_inserted_position;       // Position in the modified ring for from_point
-    size_t to_inserted_position;         // Position in the modified ring for to_point
-    
-    PolygonSplittingIntersectionInfo(const Point& from_pt, const Point& to_pt, size_t from_edge_idx, size_t to_edge_idx, size_t from_inserted_pos = SIZE_MAX, size_t to_inserted_pos = SIZE_MAX)
-        : from_point(from_pt), to_point(to_pt), from_crossed_edge_index(from_edge_idx), to_crossed_edge_index(to_edge_idx), from_inserted_position(from_inserted_pos), to_inserted_position(to_inserted_pos) {}
 };
 
 /**

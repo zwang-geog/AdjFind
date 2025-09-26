@@ -1,14 +1,17 @@
 #include "io/point_reader.hpp"
+#include "io/coordinate_system_utils.hpp"
 #include <stdexcept>
 #include <iostream>
 #include <sstream>
 #include <algorithm>
+#include <gdal.h>
+#include <ogr_api.h>
 
 namespace adjfind {
 namespace io {
 
 PointReader::PointReader(const PointReaderConfig& config)
-    : config_(config), coordinate_transformation_(nullptr) {
+    : config_(config), dataset_(nullptr), coordinate_transformation_(nullptr) {
     initGDAL();
 }
 
@@ -20,8 +23,8 @@ PointReader::~PointReader() {
     }
     
     if (dataset_) {
-        GDALDataset* ds = dataset_.release();
-        GDALClose(ds);
+        GDALClose(dataset_);
+        dataset_ = nullptr;
     }
 }
 
@@ -35,13 +38,12 @@ bool PointReader::read() {
     
     // Close any existing dataset
     if (dataset_) {
-        GDALDataset* ds = dataset_.release();
-        GDALClose(ds);
+        GDALClose(dataset_);
+        dataset_ = nullptr;
     }
 
     // Open the dataset
-    dataset_.reset(static_cast<GDALDataset*>(
-        GDALOpenEx(config_.file_path.c_str(), GDAL_OF_VECTOR, nullptr, nullptr, nullptr)));
+    dataset_ = GDALOpenEx(config_.file_path.c_str(), GDAL_OF_VECTOR, nullptr, nullptr, nullptr);
     
     if (!dataset_) {
         std::cerr << "Failed to open point file: " << config_.file_path << std::endl;
@@ -60,33 +62,34 @@ bool PointReader::readFeatures() {
     points_.clear();
     
     // Check if layer index is valid
-    if (config_.layer_index < 0 || config_.layer_index >= dataset_->GetLayerCount()) {
+    int layer_count = GDALDatasetGetLayerCount(dataset_);
+    if (config_.layer_index < 0 || config_.layer_index >= layer_count) {
         std::cerr << "Error: Layer index " << config_.layer_index << " is out of range. Dataset has " 
-                  << dataset_->GetLayerCount() << " layers." << std::endl;
+                  << layer_count << " layers." << std::endl;
         return false;
     }
     
     // Get the specified layer
-    OGRLayer* layer = dataset_->GetLayer(config_.layer_index);
+    OGRLayerH layer = GDALDatasetGetLayer(dataset_, config_.layer_index);
     if (!layer) {
         std::cerr << "No layer found at index " << config_.layer_index << " in point dataset" << std::endl;
         return false;
     }
 
     // Print layer info
-    std::cout << "Point layer " << config_.layer_index << " name: " << layer->GetName() << std::endl;
-    std::cout << "Point feature count: " << layer->GetFeatureCount() << std::endl;
+    std::cout << "Point layer " << config_.layer_index << " name: " << OGR_L_GetName(layer) << std::endl;
+    std::cout << "Point feature count: " << OGR_L_GetFeatureCount(layer, 1) << std::endl;
     
-    OGRFeatureDefn* layerDefn = layer->GetLayerDefn();
+    OGRFeatureDefnH layerDefn = OGR_L_GetLayerDefn(layer);
     if (layerDefn) {
-        OGRwkbGeometryType gType = layerDefn->GetGeomType();
+        OGRwkbGeometryType gType = OGR_FD_GetGeomType(layerDefn);
         std::cout << "Point geometry type: " << OGRGeometryTypeToName(gType) << std::endl;
     }
 
     // Check if the specified ID field exists
     bool use_ogr_fid = false;
     if (!config_.id_field.empty()) {
-        int field_idx = layer->GetLayerDefn()->GetFieldIndex(config_.id_field.c_str());
+        int field_idx = OGR_FD_GetFieldIndex(layerDefn, config_.id_field.c_str());
         if (field_idx < 0) {
             std::cout << "Warning: Specified ID field '" << config_.id_field 
                      << "' not found. Falling back to OGR FID." << std::endl;
@@ -96,37 +99,35 @@ bool PointReader::readFeatures() {
         use_ogr_fid = true;
     }
 
-
-
     // Reset reading
-    layer->ResetReading();
+    OGR_L_ResetReading(layer);
 
     // Read all features
-    OGRFeature* feature = nullptr;
+    OGRFeatureH feature = nullptr;
     size_t feature_idx = 0;
     
-    while ((feature = layer->GetNextFeature()) != nullptr) {
+    while ((feature = OGR_L_GetNextFeature(layer)) != nullptr) {
         // Get feature ID
         size_t feature_id;
         if (use_ogr_fid) {
-            feature_id = feature->GetFID();
+            feature_id = OGR_F_GetFID(feature);
         } else {
             auto id_opt = getFieldValueAsSizeT(feature, config_.id_field);
             if (!id_opt) {
                 std::cerr << "Warning: Could not get ID for feature " << feature_idx 
                          << ". Skipping." << std::endl;
-                OGRFeature::DestroyFeature(feature);
+                OGR_F_Destroy(feature);
                 continue;
             }
             feature_id = *id_opt;
         }
         
         // Get geometry
-        OGRGeometry* geom = feature->GetGeometryRef();
+        OGRGeometryH geom = OGR_F_GetGeometryRef(feature);
         if (!geom) {
             std::cerr << "Warning: No geometry for feature " << feature_idx 
                      << ". Skipping." << std::endl;
-            OGRFeature::DestroyFeature(feature);
+            OGR_F_Destroy(feature);
             continue;
         }
         
@@ -134,7 +135,7 @@ bool PointReader::readFeatures() {
         if (!transformGeometry(geom)) {
             std::cerr << "Warning: Failed to transform geometry for feature " << feature_idx 
                      << ". Skipping." << std::endl;
-            OGRFeature::DestroyFeature(feature);
+            OGR_F_Destroy(feature);
             continue;
         }
         
@@ -144,7 +145,7 @@ bool PointReader::readFeatures() {
         // Create point feature
         points_.emplace_back(feature_id, point);
         
-        OGRFeature::DestroyFeature(feature);
+        OGR_F_Destroy(feature);
         feature_idx++;
     }
     
@@ -162,58 +163,93 @@ bool PointReader::handleCoordinateSystem() {
     }
     
     // Get coordinate system WKT from the specified layer
-    coordinate_system_wkt_ = CoordinateSystemUtils::getCoordinateSystemWKT(dataset_.get(), config_.layer_index);
+    OGRLayerH layer = GDALDatasetGetLayer(dataset_, config_.layer_index);
+    if (!layer) {
+        std::cerr << "Error: Could not get layer for coordinate system detection" << std::endl;
+        return false;
+    }
+    
+    OGRSpatialReferenceH layer_srs = OGR_L_GetSpatialRef(layer);
+    if (layer_srs) {
+        char* wkt = nullptr;
+        OSRExportToWkt(layer_srs, &wkt);
+        if (wkt) {
+            coordinate_system_wkt_ = wkt;
+            CPLFree(wkt);
+        }
+    } else {
+        coordinate_system_wkt_ = "";
+    }
     
     // Get spatial reference
-    OGRSpatialReference spatial_ref;
+    OGRSpatialReferenceH spatial_ref = OSRNewSpatialReference(nullptr);
     if (!coordinate_system_wkt_.empty()) {
-        if (spatial_ref.importFromWkt(coordinate_system_wkt_.c_str()) != OGRERR_NONE) {
+        char* wkt_copy = const_cast<char*>(coordinate_system_wkt_.c_str());
+        if (OSRImportFromWkt(spatial_ref, &wkt_copy) != OGRERR_NONE) {
             std::cerr << "Warning: Failed to parse coordinate system WKT" << std::endl;
             coordinate_system_epsg_ = -1;
+            OSRDestroySpatialReference(spatial_ref);
             return true; // Continue anyway
         }
     } else {
         // No coordinate system info
         coordinate_system_epsg_ = -1;
+        OSRDestroySpatialReference(spatial_ref);
         return true;
     }
     
     // Check if it's EPSG:4326
-    if (CoordinateSystemUtils::isEPSG4326(&spatial_ref)) {
+    bool is_epsg4326 = false;
+    const char* authority_name = OSRGetAuthorityName(spatial_ref, nullptr);
+    const char* authority_code = OSRGetAuthorityCode(spatial_ref, nullptr);
+    
+    if (authority_name && authority_code && std::string(authority_name) == "EPSG") {
+        int epsg_code = std::stoi(authority_code);
+        if (epsg_code == 4326) {
+            is_epsg4326 = true;
+        }
+    }
+    
+    if (is_epsg4326) {
         std::cout << "Point dataset is in EPSG:4326 (WGS84)" << std::endl;
         coordinate_system_epsg_ = 4326;
         
         // Get dataset center for UTM zone determination
         double center_x, center_y;
-        if (CoordinateSystemUtils::getDatasetCenter(dataset_.get(), center_x, center_y)) {
+        if (CoordinateSystemUtils::getDatasetCenter(dataset_, center_x, center_y)) {
             int utm_epsg = CoordinateSystemUtils::determineUTMEPSG(center_x, center_y);
             std::cout << "Dataset center: (" << center_x << ", " << center_y << ")" << std::endl;
             std::cout << "Recommended UTM zone: EPSG:" << utm_epsg << std::endl;
             
             // Create coordinate transformation for UTM reprojection
-            coordinate_transformation_ = CoordinateSystemUtils::createUTMTransformation(&spatial_ref, utm_epsg);
+            coordinate_transformation_ = CoordinateSystemUtils::createUTMTransformation(spatial_ref, utm_epsg);
             if (coordinate_transformation_) {
                 // Update coordinate system info
                 coordinate_system_epsg_ = utm_epsg;
-                OGRSpatialReference target_srs;
-                target_srs.importFromEPSG(utm_epsg);
-                coordinate_system_wkt_ = target_srs.exportToWkt();
+                OGRSpatialReferenceH target_srs = OSRNewSpatialReference(nullptr);
+                OSRImportFromEPSG(target_srs, utm_epsg);
+                char *wkt = nullptr;
+                OSRExportToWkt(target_srs, &wkt);
+                if (wkt) {
+                    coordinate_system_wkt_ = wkt;
+                    CPLFree(wkt);
+                }
+                OSRDestroySpatialReference(target_srs);
                 std::cout << "Successfully created UTM transformation to EPSG:" << utm_epsg << std::endl;
             } else {
                 std::cerr << "ERROR: Failed to create coordinate transformation for EPSG:4326 to UTM zone EPSG:" << utm_epsg << std::endl;
                 std::cerr << "Boost Geometry requires cartesian coordinates. Aborting program." << std::endl;
+                OSRDestroySpatialReference(spatial_ref);
                 return false;
             }
         } else {
             std::cerr << "ERROR: Could not determine dataset center for UTM zone calculation" << std::endl;
             std::cerr << "Boost Geometry requires cartesian coordinates. Aborting program." << std::endl;
+            OSRDestroySpatialReference(spatial_ref);
             return false;
         }
     } else {
         // Not EPSG:4326, get EPSG code if available
-        const char* authority_name = spatial_ref.GetAuthorityName(nullptr);
-        const char* authority_code = spatial_ref.GetAuthorityCode(nullptr);
-        
         if (authority_name && authority_code && std::string(authority_name) == "EPSG") {
             coordinate_system_epsg_ = std::stoi(authority_code);
             std::cout << "Point dataset coordinate system: EPSG:" << coordinate_system_epsg_ << std::endl;
@@ -223,16 +259,19 @@ bool PointReader::handleCoordinateSystem() {
         }
     }
     
+    OSRDestroySpatialReference(spatial_ref);
     return true;
 }
 
-bool PointReader::transformGeometry(OGRGeometry* geom) const {
+
+
+bool PointReader::transformGeometry(OGRGeometryH geom) const {
     if (!coordinate_transformation_ || !geom) {
         return true; // No transformation needed or no geometry
     }
     
     // Transform the geometry in-place
-    if (!geom->transform(coordinate_transformation_)) {
+    if (OGR_G_Transform(geom, coordinate_transformation_) != OGRERR_NONE) {
         std::cerr << "Warning: Failed to transform geometry coordinates" << std::endl;
         return false;
     }
@@ -264,47 +303,48 @@ const graph::PointFeature& PointReader::getPointFeature(size_t index) const {
 
 
 
-std::optional<OGRSpatialReference> PointReader::getSpatialRef() const {
+std::optional<OGRSpatialReferenceH> PointReader::getSpatialRef() const {
     if (!dataset_) {
         return std::nullopt;
     }
     
-    OGRLayer* layer = dataset_->GetLayer(0);
+    OGRLayerH layer = GDALDatasetGetLayer(dataset_, 0);
     if (!layer) {
         return std::nullopt;
     }
     
-    OGRSpatialReference* srs = layer->GetSpatialRef();
+    OGRSpatialReferenceH srs = OGR_L_GetSpatialRef(layer);
     if (srs) {
-        return *srs;
+        return srs;
     }
     
     return std::nullopt;
 }
 
-std::optional<size_t> PointReader::getFieldValueAsSizeT(const OGRFeature* feature,
+std::optional<size_t> PointReader::getFieldValueAsSizeT(const OGRFeatureH feature,
                                                        const std::string& field_name) const {
     if (!feature || field_name.empty()) {
         return std::nullopt;
     }
     
-    int field_idx = feature->GetFieldIndex(field_name.c_str());
+    int field_idx = OGR_F_GetFieldIndex(feature, field_name.c_str());
     if (field_idx < 0) {
         return std::nullopt;
     }
     
-    if (feature->IsFieldSetAndNotNull(field_idx)) {
-        OGRFieldType field_type = feature->GetFieldDefnRef(field_idx)->GetType();
+    if (OGR_F_IsFieldSetAndNotNull(feature, field_idx)) {
+        OGRFieldDefnH field_defn = OGR_F_GetFieldDefnRef(feature, field_idx);
+        OGRFieldType field_type = OGR_Fld_GetType(field_defn);
         
         switch (field_type) {
             case OFTInteger:
-                return static_cast<size_t>(feature->GetFieldAsInteger(field_idx));
+                return static_cast<size_t>(OGR_F_GetFieldAsInteger(feature, field_idx));
             case OFTInteger64:
-                return static_cast<size_t>(feature->GetFieldAsInteger64(field_idx));
+                return static_cast<size_t>(OGR_F_GetFieldAsInteger64(feature, field_idx));
             case OFTReal:
-                return static_cast<size_t>(feature->GetFieldAsDouble(field_idx));
+                return static_cast<size_t>(OGR_F_GetFieldAsDouble(feature, field_idx));
             case OFTString: {
-                const char* str_val = feature->GetFieldAsString(field_idx);
+                const char* str_val = OGR_F_GetFieldAsString(feature, field_idx);
                 if (str_val) {
                     try {
                         return std::stoull(str_val);
@@ -322,30 +362,31 @@ std::optional<size_t> PointReader::getFieldValueAsSizeT(const OGRFeature* featur
     return std::nullopt;
 }
 
-double PointReader::getFieldValueAsDouble(const OGRFeature* feature,
+double PointReader::getFieldValueAsDouble(const OGRFeatureH feature,
                                         const std::string& field_name,
                                         double default_value) const {
     if (!feature || field_name.empty()) {
         return default_value;
     }
     
-    int field_idx = feature->GetFieldIndex(field_name.c_str());
+    int field_idx = OGR_F_GetFieldIndex(feature, field_name.c_str());
     if (field_idx < 0) {
         return default_value;
     }
     
-    if (feature->IsFieldSetAndNotNull(field_idx)) {
-        OGRFieldType field_type = feature->GetFieldDefnRef(field_idx)->GetType();
+    if (OGR_F_IsFieldSetAndNotNull(feature, field_idx)) {
+        OGRFieldDefnH field_defn = OGR_F_GetFieldDefnRef(feature, field_idx);
+        OGRFieldType field_type = OGR_Fld_GetType(field_defn);
         
         switch (field_type) {
             case OFTInteger:
-                return static_cast<double>(feature->GetFieldAsInteger(field_idx));
+                return static_cast<double>(OGR_F_GetFieldAsInteger(feature, field_idx));
             case OFTInteger64:
-                return static_cast<double>(feature->GetFieldAsInteger64(field_idx));
+                return static_cast<double>(OGR_F_GetFieldAsInteger64(feature, field_idx));
             case OFTReal:
-                return feature->GetFieldAsDouble(field_idx);
+                return OGR_F_GetFieldAsDouble(feature, field_idx);
             case OFTString: {
-                const char* str_val = feature->GetFieldAsString(field_idx);
+                const char* str_val = OGR_F_GetFieldAsString(feature, field_idx);
                 if (str_val) {
                     try {
                         return std::stod(str_val);
@@ -363,30 +404,27 @@ double PointReader::getFieldValueAsDouble(const OGRFeature* feature,
     return default_value;
 }
 
-graph::Point PointReader::convertOGRToPoint(const OGRGeometry* ogr_geom) const {
+graph::Point PointReader::convertOGRToPoint(const OGRGeometryH ogr_geom) const {
     graph::Point point(0.0, 0.0);
     
     if (!ogr_geom) {
         return point;
     }
     
-    OGRwkbGeometryType geom_type = wkbFlatten(ogr_geom->getGeometryType());
+    OGRwkbGeometryType geom_type = wkbFlatten(OGR_G_GetGeometryType(ogr_geom));
     
     if (geom_type == wkbPoint) {
-        const OGRPoint* ogr_point = static_cast<const OGRPoint*>(ogr_geom);
-        double x = ogr_point->getX();
-        double y = ogr_point->getY();
+        double x, y, z;
+        OGR_G_GetPoint(ogr_geom, 0, &x, &y, &z);
         point = graph::Point(x, y);
     } else if (geom_type == wkbMultiPoint) {
-        const OGRMultiPoint* ogr_multipoint = static_cast<const OGRMultiPoint*>(ogr_geom);
-        int num_points = ogr_multipoint->getNumGeometries();
+        int num_points = OGR_G_GetGeometryCount(ogr_geom);
         
         // For simplicity, take the first point
         if (num_points > 0) {
-            const OGRPoint* ogr_point = static_cast<const OGRPoint*>(
-                ogr_multipoint->getGeometryRef(0));
-            double x = ogr_point->getX();
-            double y = ogr_point->getY();
+            OGRGeometryH point_geom = OGR_G_GetGeometryRef(ogr_geom, 0);
+            double x, y, z;
+            OGR_G_GetPoint(point_geom, 0, &x, &y, &z);
             point = graph::Point(x, y);
         }
     }

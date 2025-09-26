@@ -1,8 +1,7 @@
 #include "io/writer_road_segmentation.hpp"
 #include <gdal.h>
-#include <gdal_priv.h>
-#include <ogr_feature.h>
-#include <ogr_geometry.h>
+#include <ogr_api.h>
+#include <ogr_spatialref.h>
 #include <iostream>
 #include <filesystem>
 #include <algorithm>
@@ -21,7 +20,7 @@ RoadSegmentationWriter::~RoadSegmentationWriter() {
 
 // Removed determineFormatFromExtension method - now using GDALUtils::determineFormatFromExtension
 
-void* RoadSegmentationWriter::createGDALDataset(const RoadSegmentationWriterConfig& config, OGRCoordinateTransformation*& coord_trans, std::string& output_file_path) {
+GDALDatasetH RoadSegmentationWriter::createGDALDataset(const RoadSegmentationWriterConfig& config, OGRCoordinateTransformationH& coord_trans, std::string& output_file_path) {
     // Initialize coordinate transformation
     coord_trans = nullptr;
     
@@ -29,21 +28,28 @@ void* RoadSegmentationWriter::createGDALDataset(const RoadSegmentationWriterConf
     bool reprojection_succeeded = false;
     if (config.reproject_to_epsg4326) {
         if (!config.crs_wkt.empty()) {
-            OGRSpatialReference source_srs, target_srs;
-            source_srs.importFromWkt(config.crs_wkt.c_str());
-            target_srs.importFromEPSG(4326);
+            OGRSpatialReferenceH source_srs = OSRNewSpatialReference(nullptr);
+            OGRSpatialReferenceH target_srs = OSRNewSpatialReference(nullptr);
+            
+            char* wkt_copy = const_cast<char*>(config.crs_wkt.c_str());
+            OSRImportFromWkt(source_srs, &wkt_copy);
+            OSRImportFromEPSG(target_srs, 4326);
             
             // Set axis mapping strategy for GDAL 3+
-            source_srs.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
-            target_srs.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
+            OSRSetAxisMappingStrategy(source_srs, OAMS_TRADITIONAL_GIS_ORDER);
+            OSRSetAxisMappingStrategy(target_srs, OAMS_TRADITIONAL_GIS_ORDER);
             
-            coord_trans = OGRCreateCoordinateTransformation(&source_srs, &target_srs);
+            coord_trans = OCTNewCoordinateTransformation(source_srs, target_srs);
             if (coord_trans) {
                 reprojection_succeeded = true;
             } else {
                 std::cerr << "Warning: Failed to create coordinate transformation to EPSG:4326" << std::endl;
                 std::cerr << "Output will use original coordinate system" << std::endl;
             }
+            
+            // Clean up spatial references
+            OSRDestroySpatialReference(source_srs);
+            OSRDestroySpatialReference(target_srs);
         } else {
             std::cerr << "Warning: Cannot reproject to EPSG:4326 - no source coordinate system specified" << std::endl;
             std::cerr << "Output will use original coordinate system" << std::endl;
@@ -55,7 +61,7 @@ void* RoadSegmentationWriter::createGDALDataset(const RoadSegmentationWriterConf
     std::string format = GDALUtils::determineFormatAndModifyPath(output_file_path);
     
     // Get driver
-    GDALDriver* driver = GetGDALDriverManager()->GetDriverByName(format.c_str());
+    GDALDriverH driver = GDALGetDriverByName(format.c_str());
     if (!driver) {
         last_error_ = "Failed to get GDAL driver for format: " + format;
         if (coord_trans) {
@@ -66,7 +72,7 @@ void* RoadSegmentationWriter::createGDALDataset(const RoadSegmentationWriterConf
     }
     
     // Create dataset using the potentially modified file path
-    GDALDataset* dataset = driver->Create(output_file_path.c_str(), 0, 0, 0, GDT_Unknown, nullptr);
+    GDALDatasetH dataset = GDALCreate(driver, output_file_path.c_str(), 0, 0, 0, GDT_Unknown, nullptr);
     if (!dataset) {
         last_error_ = "Failed to create GDAL dataset: " + output_file_path;
         if (coord_trans) {
@@ -77,111 +83,116 @@ void* RoadSegmentationWriter::createGDALDataset(const RoadSegmentationWriterConf
     }
     
     // Create layer with appropriate CRS
-    OGRSpatialReference* layer_srs = nullptr;
-    OGRSpatialReference wgs84_srs;
+    OGRSpatialReferenceH layer_srs = nullptr;
     
     if (config.reproject_to_epsg4326 && reprojection_succeeded) {
         // If reprojection is enabled and succeeded, use WGS84 for layer CRS
-        wgs84_srs.importFromEPSG(4326);
-        wgs84_srs.SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
-        layer_srs = &wgs84_srs;
+        layer_srs = OSRNewSpatialReference(nullptr);
+        OSRImportFromEPSG(layer_srs, 4326);
+        OSRSetAxisMappingStrategy(layer_srs, OAMS_TRADITIONAL_GIS_ORDER);
     } else if (!config.crs_wkt.empty()) {
         // If no reprojection or reprojection failed, use source CRS
-        layer_srs = new OGRSpatialReference();
-        if (layer_srs->importFromWkt(config.crs_wkt.c_str()) != OGRERR_NONE) {
-            delete layer_srs;
+        layer_srs = OSRNewSpatialReference(nullptr);
+        char* wkt_copy = const_cast<char*>(config.crs_wkt.c_str());
+        if (OSRImportFromWkt(layer_srs, &wkt_copy) != OGRERR_NONE) {
+            OSRDestroySpatialReference(layer_srs);
             layer_srs = nullptr;
         } else {
-            layer_srs->SetAxisMappingStrategy(OAMS_TRADITIONAL_GIS_ORDER);
+            OSRSetAxisMappingStrategy(layer_srs, OAMS_TRADITIONAL_GIS_ORDER);
         }
     }
     
     // Use default layer name
     std::string layer_name = "road_segments";
-    OGRLayer* layer = dataset->CreateLayer(layer_name.c_str(), layer_srs, wkbLineString, nullptr);
+    OGRLayerH layer = GDALDatasetCreateLayer(dataset, layer_name.c_str(), layer_srs, wkbLineString, nullptr);
     if (!layer) {
         last_error_ = "Failed to create layer: " + layer_name;
         if (coord_trans) {
             OCTDestroyCoordinateTransformation(coord_trans);
             coord_trans = nullptr;
         }
-        if (layer_srs && layer_srs != &wgs84_srs) delete layer_srs;
+        if (layer_srs) OSRDestroySpatialReference(layer_srs);
         GDALClose(dataset);
         return nullptr;
     }
     
     // Create fields
-    OGRFieldDefn id_field("id", OFTInteger64);
-    layer->CreateField(&id_field);
+    OGRFieldDefnH id_field = OGR_Fld_Create("id", OFTInteger64);
+    OGR_L_CreateField(layer, id_field, 1);
+    OGR_Fld_Destroy(id_field);
     
-    OGRFieldDefn road_id_field("road_id", OFTInteger64);
-    layer->CreateField(&road_id_field);
+    OGRFieldDefnH road_id_field = OGR_Fld_Create("road_id", OFTInteger64);
+    OGR_L_CreateField(layer, road_id_field, 1);
+    OGR_Fld_Destroy(road_id_field);
     
-    OGRFieldDefn point_id_field("point_id", OFTInteger64);
-    layer->CreateField(&point_id_field);
+    OGRFieldDefnH point_id_field = OGR_Fld_Create("point_id", OFTInteger64);
+    OGR_L_CreateField(layer, point_id_field, 1);
+    OGR_Fld_Destroy(point_id_field);
     
-    OGRFieldDefn length_field("length", OFTReal);
-    layer->CreateField(&length_field);
+    OGRFieldDefnH length_field = OGR_Fld_Create("length", OFTReal);
+    OGR_L_CreateField(layer, length_field, 1);
+    OGR_Fld_Destroy(length_field);
     
-    OGRFieldDefn distance_category_field("distance_category", OFTString);
-    layer->CreateField(&distance_category_field);
+    OGRFieldDefnH distance_category_field = OGR_Fld_Create("distance_category", OFTString);
+    OGR_L_CreateField(layer, distance_category_field, 1);
+    OGR_Fld_Destroy(distance_category_field);
     
-    OGRFieldDefn from_distance_field("from_distance", OFTReal);
-    layer->CreateField(&from_distance_field);
+    OGRFieldDefnH from_distance_field = OGR_Fld_Create("from_distance", OFTReal);
+    OGR_L_CreateField(layer, from_distance_field, 1);
+    OGR_Fld_Destroy(from_distance_field);
     
-    OGRFieldDefn to_distance_field("to_distance", OFTReal);
-    layer->CreateField(&to_distance_field);
+    OGRFieldDefnH to_distance_field = OGR_Fld_Create("to_distance", OFTReal);
+    OGR_L_CreateField(layer, to_distance_field, 1);
+    OGR_Fld_Destroy(to_distance_field);
     
-    if (layer_srs && layer_srs != &wgs84_srs) delete layer_srs;
+    if (layer_srs) OSRDestroySpatialReference(layer_srs);
     return dataset;
 }
 
-bool RoadSegmentationWriter::writeFeature(void* dataset_ptr, void* layer_ptr, 
-                                        OGRCoordinateTransformation* coord_trans,
+bool RoadSegmentationWriter::writeFeature(GDALDatasetH dataset, OGRLayerH layer, 
+                                        OGRCoordinateTransformationH coord_trans,
                                         const graph::RoadSplitByDistanceBracketsOutput& result, 
                                         size_t feature_id) {
-    GDALDataset* dataset = static_cast<GDALDataset*>(dataset_ptr);
-    OGRLayer* layer = static_cast<OGRLayer*>(layer_ptr);
-    
     // Create feature
-    OGRFeature* feature = OGRFeature::CreateFeature(layer->GetLayerDefn());
+    OGRFeatureDefnH layer_defn = OGR_L_GetLayerDefn(layer);
+    OGRFeatureH feature = OGR_F_Create(layer_defn);
     if (!feature) {
         last_error_ = "Failed to create feature";
         return false;
     }
     
     // Set geometry
-    OGRLineString* line_string = new OGRLineString();
+    OGRGeometryH line_string = OGR_G_CreateGeometry(wkbLineString);
     for (const auto& point : result.geometry) {
-        line_string->addPoint(point.get<0>(), point.get<1>());
+        OGR_G_AddPoint(line_string, point.get<0>(), point.get<1>(), 0.0);
     }
     
     // Reproject geometry if transformation is provided
     if (coord_trans) {
-        if (!line_string->transform(coord_trans)) {
+        if (OGR_G_Transform(line_string, coord_trans) != OGRERR_NONE) {
             std::cerr << "Warning: Failed to reproject geometry to EPSG:4326" << std::endl;
         }
     }
     
-    feature->SetGeometry(line_string);
+    OGR_F_SetGeometry(feature, line_string);
     
     // Set fields
-    feature->SetField("id", static_cast<GIntBig>(feature_id));
-    feature->SetField("road_id", static_cast<GIntBig>(result.raw_feature_id));
-    feature->SetField("point_id", static_cast<GIntBig>(result.nearest_point_id));
-    feature->SetField("length", result.length);
-    feature->SetField("distance_category", result.distance_category.c_str());
-    feature->SetField("from_distance", result.from_distance);
-    feature->SetField("to_distance", result.to_distance);
+    OGR_F_SetFieldInteger64(feature, OGR_F_GetFieldIndex(feature, "id"), static_cast<GIntBig>(feature_id));
+    OGR_F_SetFieldInteger64(feature, OGR_F_GetFieldIndex(feature, "road_id"), static_cast<GIntBig>(result.raw_feature_id));
+    OGR_F_SetFieldInteger64(feature, OGR_F_GetFieldIndex(feature, "point_id"), static_cast<GIntBig>(result.nearest_point_id));
+    OGR_F_SetFieldDouble(feature, OGR_F_GetFieldIndex(feature, "length"), result.length);
+    OGR_F_SetFieldString(feature, OGR_F_GetFieldIndex(feature, "distance_category"), result.distance_category.c_str());
+    OGR_F_SetFieldDouble(feature, OGR_F_GetFieldIndex(feature, "from_distance"), result.from_distance);
+    OGR_F_SetFieldDouble(feature, OGR_F_GetFieldIndex(feature, "to_distance"), result.to_distance);
     
     // Create feature in layer
-    if (layer->CreateFeature(feature) != OGRERR_NONE) {
+    if (OGR_L_CreateFeature(layer, feature) != OGRERR_NONE) {
         last_error_ = "Failed to create feature in layer";
-        OGRFeature::DestroyFeature(feature);
+        OGR_F_Destroy(feature);
         return false;
     }
     
-    OGRFeature::DestroyFeature(feature);
+    OGR_F_Destroy(feature);
     return true;
 }
 
@@ -195,16 +206,15 @@ bool RoadSegmentationWriter::writeRoadSegmentationResults(const RoadSegmentation
     }
     
     // Create dataset and coordinate transformation
-    OGRCoordinateTransformation* coord_trans = nullptr;
+    OGRCoordinateTransformationH coord_trans = nullptr;
     std::string output_file_path;  // Will be set by createGDALDataset
-    void* dataset_ptr = createGDALDataset(config, coord_trans, output_file_path);
-    if (!dataset_ptr) {
+    GDALDatasetH dataset = createGDALDataset(config, coord_trans, output_file_path);
+    if (!dataset) {
         // createGDALDataset already sets last_error_ if it fails
         return false;
     }
     
-    GDALDataset* dataset = static_cast<GDALDataset*>(dataset_ptr);
-    OGRLayer* layer = dataset->GetLayer(0);
+    OGRLayerH layer = GDALDatasetGetLayer(dataset, 0);
     
     if (!layer) {
         last_error_ = "Failed to get layer from dataset";
@@ -218,7 +228,7 @@ bool RoadSegmentationWriter::writeRoadSegmentationResults(const RoadSegmentation
     // Write features
     size_t feature_id = 0;
     for (const auto& result : results) {
-        if (!writeFeature(dataset_ptr, layer, coord_trans, result, feature_id)) {
+        if (!writeFeature(dataset, layer, coord_trans, result, feature_id)) {
             if (coord_trans) OCTDestroyCoordinateTransformation(coord_trans);
             GDALClose(dataset);
             return false;

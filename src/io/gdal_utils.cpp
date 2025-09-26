@@ -1,6 +1,6 @@
 #include "io/gdal_utils.hpp"
 #include <gdal.h>
-#include <gdal_priv.h>
+#include <ogr_api.h>
 #include <algorithm>
 #include <iostream>
 #include <cstring>
@@ -10,14 +10,14 @@ namespace io {
 
 
 bool GDALUtils::isDriverAvailable(const std::string& driver_name) {
-    GDALDriver* driver = GetGDALDriverManager()->GetDriverByName(driver_name.c_str());
+    GDALDriverH driver = GDALGetDriverByName(driver_name.c_str());
     if (!driver) {
         std::cout << "WARNING: GDAL driver '" << driver_name << "' is not available. Falling back to GeoJSON format." << std::endl;
         return false;
     }
     
     // Check if the driver supports creation
-    const char* creation_support = driver->GetMetadataItem(GDAL_DCAP_CREATE);
+    const char* creation_support = GDALGetMetadataItem(driver, GDAL_DCAP_CREATE, nullptr);
     if (!creation_support || strcmp(creation_support, "YES") != 0) {
         std::cout << "WARNING: GDAL driver '" << driver_name << "' does not support creation. Falling back to GeoJSON format." << std::endl;
         return false;
