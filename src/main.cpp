@@ -91,9 +91,9 @@ void printUsage(const char* programName) {
 }
 
 void printDetailedHelp(const char* programName) {
-    std::cout << "AdjFind - Transportation Network Analysis Tool\n"
+    std::cout << "AdjFind - Adjacency/Proximity Path Finding Tools\n"
               << "==============================================\n\n"
-              << "AdjFind is a C++ application that provides specialized transportation network algorithms.\n\n"
+              << "AdjFind is a C++ application that provides specialized path finding algorithms related to adjacency/proximity.\n\n"
               << "MODES:\n\n"
               << "1. ROAD SEGMENTATION MODE (--mode road-segmentation)\n"
               << "   Determines which service points (e.g., hydrants) are closest to each road segment using network distance.\n"
@@ -538,7 +538,7 @@ int main(int argc, char* argv[]) {
         
         // Check for version flag
         if (args.count("version") > 0 || args.count("v") > 0) {
-            std::cout << "AdjFind v0.0.1\n";
+            std::cout << "AdjFind v0.1.0\n";
             std::cout << "Adjacency/Proximity Path Finding Tool\n";
             std::cout << "Copyright (c) 2025 Zifan Wang\n";
             std::cout << "MIT License\n";

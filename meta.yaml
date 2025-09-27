@@ -1,5 +1,5 @@
 {% set name = "adjfind" %}
-{% set version = "0.0.1" %}
+{% set version = "0.1.0" %}
 
 package:
   name: {{ name|lower }}
@@ -19,7 +19,6 @@ build:
     mkdir build
     cd build
     
-    # Simple cmake build - let conda handle RPATH automatically
     cmake .. \
       -DCMAKE_BUILD_TYPE=Release \
       -DCMAKE_INSTALL_PREFIX=$PREFIX \
@@ -27,9 +26,6 @@ build:
     
     cmake --build . --config Release -j1
     cmake --install .
-  
-  # Let conda handle binary relocation (more reliable than manual RPATH)
-  binary_relocation: true
 
 requirements:
   build:
@@ -53,7 +49,7 @@ about:
   home: https://github.com/zwang-geog/AdjFind
   license: MIT
   license_file: LICENSE
-  summary: CLI of specialized finding algorithms related to adjacency/proximity
+  summary: CLI of specialized path finding algorithms related to adjacency/proximity
   description: |
     The command-line tool supports three main modes:
     • Road Segmentation Mode: Determines which service points (e.g., hydrants) are closest to each road segment using network distance, and optionally splits roads into discrete distance categories for service area analysis.
