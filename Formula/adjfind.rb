@@ -18,10 +18,10 @@ class Adjfind < Formula
              "-DCMAKE_INSTALL_PREFIX=#{prefix}",
              "-DCMAKE_POSITION_INDEPENDENT_CODE=ON",
              *std_cmake_args
-      
+
       # Build
       system "cmake", "--build", ".", "--config", "Release"
-      
+
       # Install
       system "cmake", "--install", "."
     end
