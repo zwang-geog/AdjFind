@@ -2,7 +2,7 @@ class Adjfind < Formula
   desc "C++ program with specialized path finding algorithms for adjacency/proximity"
   homepage "https://github.com/zwang-geog/AdjFind"
   url "https://github.com/zwang-geog/AdjFind/archive/refs/tags/v0.1.1.tar.gz"
-  sha256 "061413bd1bcce01615b5a440cf09d8bf88c7b35fd29e581ec62b271a541a6827"
+  sha256 "4cc45499380590e6cb5e13b56a54d1f91f02f5241944b1f79d8a8a4c31ff9850"
   license "MIT"
 
   depends_on "cmake" => :build

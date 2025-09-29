@@ -213,7 +213,7 @@ Before building this project, ensure you have the following dependencies install
 
 **Note on Linking Strategy:**
 - **GDAL**: Dynamically linked - must be installed on the target system
-- **Boost**: Mixed approach - geometry (header-only), system/filesystem (compiled but statically linked) - no runtime installation needed  
+- **Boost**: Mixed approach - geometry (header-only), filesystem (compiled library) - Boost.Filesystem runtime library required
 - **nlohmann_json**: Header-only library - included in the binary (WASM builds only)
 - **Standard libraries**: Partially statically linked for better compatibility
 
@@ -272,24 +272,24 @@ sudo make install
 ```bash
 # Ubuntu/Debian (runtime libraries)
 sudo apt update
-sudo apt install gdal-bin
+sudo apt install gdal-bin libboost-filesystem-dev
 
 # CentOS/RHEL
-sudo yum install gdal
+sudo yum install gdal boost-filesystem
 
-# Note: Boost is header-only, no runtime installation needed
+# Note: Boost.Filesystem runtime library is required
 ```
 
 #### macOS:
 ```bash
 # Install runtime libraries
-brew install gdal
+brew install gdal boost
 
-# Note: Boost is header-only, no runtime installation needed
+# Note: Boost.Filesystem runtime library is required
 ```
 
 #### Windows:
-- GDAL is included with the vcpkg installation
+- GDAL and Boost are included with the vcpkg installation
 - Ensure the vcpkg environment is properly configured
 
 ## Disclaimer
