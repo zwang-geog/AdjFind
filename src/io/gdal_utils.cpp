@@ -27,7 +27,7 @@ bool GDALUtils::isDriverAvailable(const std::string& driver_name) {
 }
 
 std::string GDALUtils::determineFormatAndModifyPath(std::string& file_path) {
-    std::filesystem::path path(file_path);
+    fs::path path(file_path);
     std::string extension = path.extension().string();
     
     // Convert to lowercase for case-insensitive comparison
@@ -129,7 +129,7 @@ std::string GDALUtils::determineFormatAndModifyPath(std::string& file_path) {
     
     // Modify file path if format fallback occurred
     if (needs_modification) {
-        std::filesystem::path original_path(file_path);
+        fs::path original_path(file_path);
         std::string new_path = original_path.replace_extension(".geojson").string();
         std::cout << "WARNING: Changing output file extension from '" << extension 
                   << "' to '.geojson' due to format fallback." << std::endl;

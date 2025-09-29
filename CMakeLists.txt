@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(adjfind VERSION 0.1.0)
+project(adjfind VERSION 0.1.1)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -14,7 +14,7 @@ if(POLICY CMP0144)
 endif()
 
 # Find required packages
-find_package(Boost REQUIRED)
+find_package(Boost REQUIRED COMPONENTS filesystem)
 find_package(GDAL REQUIRED)
 
 # Include directories
@@ -62,6 +62,7 @@ target_link_libraries(adjfind
     PRIVATE
     GDAL::GDAL
     Boost::boost
+    Boost::filesystem
 )
 
 # Enable packaging

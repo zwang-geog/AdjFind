@@ -4,7 +4,8 @@
 #include <ogr_api.h>
 #include <ogr_spatialref.h>
 #include <iostream>
-#include <filesystem>
+#include <boost/filesystem.hpp>
+namespace fs = boost::filesystem;
 #include <algorithm>
 #include <sstream>
 #include <unordered_set>
@@ -334,7 +335,7 @@ GDALDatasetH NeighboringPointsWriter::createPointDataset(const NeighboringPoints
 }
 
 std::string NeighboringPointsWriter::generateSnappedPointsFilePath(const std::string& base_file_path) const {
-    std::filesystem::path path(base_file_path);
+    fs::path path(base_file_path);
     std::string stem = path.stem().string();
     std::string extension = path.extension().string();
     return (path.parent_path() / (stem + "_snapped_points" + extension)).string();

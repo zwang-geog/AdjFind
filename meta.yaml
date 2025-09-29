@@ -1,17 +1,13 @@
 {% set name = "adjfind" %}
-{% set version = "0.1.0" %}
+{% set version = "0.1.1" %}
 
 package:
   name: {{ name|lower }}
   version: {{ version }}
 
 source:
-  git_url: https://github.com/zwang-geog/AdjFind.git
-  git_tag: v{{ version }}
-
-channels:
-  - conda-forge
-  - defaults
+  url: https://github.com/zwang-geog/AdjFind/archive/refs/tags/v{{ version }}.tar.gz
+  sha256: 061413bd1bcce01615b5a440cf09d8bf88c7b35fd29e581ec62b271a541a6827
 
 build:
   number: 0
@@ -29,21 +25,25 @@ build:
 
 requirements:
   build:
-    - cmake >=3.16
+    - cmake
     - make
     - git
     - {{ compiler('cxx') }}
     - {{ compiler('c') }}
+    - {{ stdlib('c') }}
   host:
     - libgdal-core
-    - boost-cpp
+    - libboost-devel
   run:
     - libgdal-core
+    - libboost-filesystem
 
 test:
   commands:
-    - adjfind --help
-    - adjfind --version
+    - adjfind --help  # [unix]
+    - adjfind --version  # [unix]
+    - $PREFIX/bin/adjfind.exe --help  # [win]
+    - $PREFIX/bin/adjfind.exe --version  # [win]
 
 about:
   home: https://github.com/zwang-geog/AdjFind

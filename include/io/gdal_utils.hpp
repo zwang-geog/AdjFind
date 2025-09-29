@@ -2,7 +2,8 @@
 #define ADJFIND_GDAL_UTILS_HPP
 
 #include <string>
-#include <filesystem>
+#include <boost/filesystem.hpp>
+namespace fs = boost::filesystem;
 
 namespace adjfind {
 namespace io {

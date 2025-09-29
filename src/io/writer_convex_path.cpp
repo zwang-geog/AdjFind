@@ -3,7 +3,8 @@
 #include <ogr_api.h>
 #include <ogr_spatialref.h>
 #include <iostream>
-#include <filesystem>
+#include <boost/filesystem.hpp>
+namespace fs = boost::filesystem;
 #include <algorithm>
 #include <sstream>
 #include <boost/geometry.hpp>
@@ -190,7 +191,7 @@ GDALDatasetH ConvexPathWriter::createPointDataset(const ConvexPathWriterConfig& 
     
     // Modify output file path for point dataset
     output_file_path = config.output_file_path;
-    std::filesystem::path path(output_file_path);
+    fs::path path(output_file_path);
     std::string stem = path.stem().string();
     std::string extension = path.extension().string();
     output_file_path = (path.parent_path() / (stem + "_least_accessible_point" + extension)).string();

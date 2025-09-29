@@ -1,19 +1,19 @@
 class Adjfind < Formula
-  desc "A C++ program containing specialized path finding algorithms related to adjacency/proximity"
+  desc "C++ program with specialized path finding algorithms for adjacency/proximity"
   homepage "https://github.com/zwang-geog/AdjFind"
-  url "https://github.com/zwang-geog/AdjFind.git", tag: "v0.1.0"
-  version "0.1.0"
+  url "https://github.com/zwang-geog/AdjFind/archive/refs/tags/v0.1.1.tar.gz"
+  sha256 "061413bd1bcce01615b5a440cf09d8bf88c7b35fd29e581ec62b271a541a6827"
   license "MIT"
 
   depends_on "cmake" => :build
-  depends_on "gdal"
   depends_on "boost"
+  depends_on "gdal"
 
   def install
     # Create build directory
     mkdir "build" do
       # Configure with CMake
-      system "cmake", "..", 
+      system "cmake", "..",
              "-DCMAKE_BUILD_TYPE=Release",
              "-DCMAKE_INSTALL_PREFIX=#{prefix}",
              "-DCMAKE_POSITION_INDEPENDENT_CODE=ON",
@@ -29,6 +29,6 @@ class Adjfind < Formula
 
   test do
     # Test that the executable runs and shows help
-    system "#{bin}/adjfind", "--help"
+    system bin/"adjfind", "--help"
   end
 end

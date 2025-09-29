@@ -3,7 +3,7 @@
 #include <ogr_api.h>
 #include <ogr_spatialref.h>
 #include <iostream>
-#include <filesystem>
+#include <boost/filesystem.hpp>
 #include <algorithm>
 
 namespace adjfind {
