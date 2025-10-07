@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(adjfind VERSION 0.1.1)
+project(adjfind VERSION 0.1.2)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -65,10 +65,31 @@ target_link_libraries(adjfind
     Boost::filesystem
 )
 
+# Base performance optimization flags (always enabled for speed)
+target_compile_options(adjfind PRIVATE 
+    -O3 
+    -flto 
+    -ffast-math 
+    -fomit-frame-pointer
+)
+
+# Enable Link Time Optimization
+target_link_options(adjfind PRIVATE -flto)
+
+# Build-type specific flags
+if(CMAKE_BUILD_TYPE STREQUAL "Release" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
+    target_compile_options(adjfind PRIVATE -DNDEBUG)
+elseif(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    target_compile_options(adjfind PRIVATE 
+        -g 
+        -DDEBUG
+    )
+endif()
+
 # Enable packaging
 include(CPack)
 set(CPACK_PACKAGE_VERSION ${PROJECT_VERSION})
-set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "AdjFind - Transportation Network Algorithms")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "AdjFind - Adjacency/Proximity Path Finding Tools")
 set(CPACK_PACKAGE_VENDOR "Zifan Wang")
 set(CPACK_PACKAGE_DESCRIPTION_FILE "${CMAKE_CURRENT_SOURCE_DIR}/README.md")
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/LICENSE")
