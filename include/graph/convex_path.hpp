@@ -220,6 +220,18 @@ public:
      * @return true if network distance information is included, false otherwise
      */
     bool getIncludeNetworkDistance() const { return include_network_distance_; }
+    
+    /**
+     * Set the graph vertex snapping tolerance
+     * @param tolerance Distance tolerance for snapping vertices (default: 1e-6)
+     */
+    void setGraphVertexSnappingTolerance(double tolerance) { graph_vertex_snapping_tolerance_ = tolerance; }
+    
+    /**
+     * Get the graph vertex snapping tolerance
+     * @return Current graph vertex snapping tolerance
+     */
+    double getGraphVertexSnappingTolerance() const { return graph_vertex_snapping_tolerance_; }
 
 private:
     /**
@@ -247,6 +259,9 @@ private:
     
     // Flag to include network distance information in output
     bool include_network_distance_;
+    
+    // Graph vertex snapping tolerance
+    double graph_vertex_snapping_tolerance_;
     
     // Convex path graph data structures
     std::vector<ConvexPathGraphVertex> convex_path_vertices_;

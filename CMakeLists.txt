@@ -65,27 +65,6 @@ target_link_libraries(adjfind
     Boost::filesystem
 )
 
-# Base performance optimization flags (always enabled for speed)
-target_compile_options(adjfind PRIVATE 
-    -O3 
-    -flto 
-    -ffast-math 
-    -fomit-frame-pointer
-)
-
-# Enable Link Time Optimization
-target_link_options(adjfind PRIVATE -flto)
-
-# Build-type specific flags
-if(CMAKE_BUILD_TYPE STREQUAL "Release" OR CMAKE_BUILD_TYPE STREQUAL "RelWithDebInfo")
-    target_compile_options(adjfind PRIVATE -DNDEBUG)
-elseif(CMAKE_BUILD_TYPE STREQUAL "Debug")
-    target_compile_options(adjfind PRIVATE 
-        -g 
-        -DDEBUG
-    )
-endif()
-
 # Enable packaging
 include(CPack)
 set(CPACK_PACKAGE_VERSION ${PROJECT_VERSION})

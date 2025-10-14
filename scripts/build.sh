@@ -41,8 +41,7 @@ cd "$BUILD_DIR"
 # Configure with CMake
 cmake .. \
     -DCMAKE_BUILD_TYPE="$BUILD_TYPE" \
-    -DCMAKE_INSTALL_PREFIX="$INSTALL_PREFIX" \
-    -DCMAKE_POSITION_INDEPENDENT_CODE=ON 
+    -DCMAKE_INSTALL_PREFIX="$INSTALL_PREFIX"
 
 # Build
 cmake --build . --config "$BUILD_TYPE" -j$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 1)

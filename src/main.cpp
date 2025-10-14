@@ -79,6 +79,7 @@ void printUsage(const char* programName) {
               << "  --road-ids-snappable-field <name> Field name for comma-separated road IDs\n"
               << "  --min-polygon-boundary-segment-length-for-nearest-road-edge-detection <length> Minimum polygon boundary segment length for nearest road edge detection (default: 80.0)\n"
               << "  --include-network-distance    A flag argument that will include network distance in addition to access distance (structure-road) in the objective function of path finding algorithm (default: not included)\n"
+              << "  --graph-vertex-snapping-tolerance <value> Distance tolerance for snapping graph vertices (default: 1e-6)\n"
               << "\nFor neighboring-points mode, additional optional arguments:\n"
               << "  --intersection-vertex-distance-threshold <value> Any point snapped to within this threshold from a road intersection will be subject to neighbor search from all outgoing directions from the intersection (default: 60.0)\n"
               << "  --cutoff <value>               If the path distance exceeds this cutoff and still no neighbor found along a given travel direction, the search along this direction will stop\n"
@@ -156,6 +157,7 @@ void printDetailedHelp(const char* programName) {
               << "     --road-ids-snappable-field <name> Field name for comma-separated road IDs\n"
               << "     --min-polygon-boundary-segment-length-for-nearest-road-edge-detection <length> Minimum polygon boundary segment length (default: 80.0)\n"
               << "     --include-network-distance    Include network distance in objective function\n"
+              << "     --graph-vertex-snapping-tolerance <value> Distance tolerance for snapping graph vertices (default: 1e-6)\n"
               << "     --reproject-to-epsg4326     Reproject output to EPSG:4326 (WGS84)\n\n"
               << "   Example:\n"
               << "     " << programName << " --road-file-path roads.gpkg --point-file-path points.gpkg --building-file-path buildings.gpkg --mode structure-access --output-file structure_results.geojson\n\n"
@@ -354,6 +356,21 @@ void processStructureAccessMode(const std::unordered_map<std::string, std::strin
     // Parse include-network-distance flag
     bool include_network_distance = args.count("include-network-distance") > 0;
     
+    // Parse graph-vertex-snapping-tolerance
+    double graph_vertex_snapping_tolerance = 1e-6; // Default value
+    if (args.count("graph-vertex-snapping-tolerance") > 0) {
+        try {
+            graph_vertex_snapping_tolerance = std::stod(args.at("graph-vertex-snapping-tolerance"));
+            if (graph_vertex_snapping_tolerance <= 0) {
+                std::cerr << "Error: graph-vertex-snapping-tolerance must be positive" << std::endl;
+                return;
+            }
+        } catch (const std::exception& e) {
+            std::cerr << "Error: Invalid graph-vertex-snapping-tolerance: " << e.what() << std::endl;
+            return;
+        }
+    }
+    
     // Create configurations
     io::RoadReaderConfig road_config;
     road_config.file_path = road_file_path;
@@ -384,6 +401,10 @@ void processStructureAccessMode(const std::unordered_map<std::string, std::strin
     // Set the include-network-distance flag
     convex_path.setIncludeNetworkDistance(include_network_distance);
     std::cout << "Include network distance flag set to: " << (include_network_distance ? "true" : "false") << std::endl;
+    
+    // Set the graph vertex snapping tolerance
+    convex_path.setGraphVertexSnappingTolerance(graph_vertex_snapping_tolerance);
+    std::cout << "Graph vertex snapping tolerance set to: " << graph_vertex_snapping_tolerance << std::endl;
     
     if (!convex_path.processConvexPathMode(road_config, point_config, building_config)) {
         std::cerr << "Error processing structure access mode" << std::endl;

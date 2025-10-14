@@ -14,7 +14,7 @@ namespace graph {
 namespace bg = boost::geometry;
 
 ConvexPath::ConvexPath()
-    : building_dataset_initialized_(false), include_network_distance_(false), next_convex_path_vertex_id_(0), polygon_split_next_vertex_id_(0) {
+    : building_dataset_initialized_(false), include_network_distance_(false), graph_vertex_snapping_tolerance_(1e-6), next_convex_path_vertex_id_(0), polygon_split_next_vertex_id_(0) {
 }
 
 bool ConvexPath::processConvexPathMode(const io::RoadReaderConfig& road_config, 
@@ -189,7 +189,7 @@ size_t ConvexPath::findOrCreateConvexPathGraphVertex(const Point& point) {
     convex_path_vertex_rtree_.query(
         bgi::nearest(point, 1) && 
         bgi::satisfies([&](const std::pair<Point, size_t>& v) {
-            return bg::distance(point, v.first) <= 1e-7;
+            return bg::distance(point, v.first) <= graph_vertex_snapping_tolerance_;
         }),
         std::back_inserter(candidates)
     );
@@ -211,7 +211,7 @@ std::optional<size_t> ConvexPath::findConvexPathGraphVertexForPoint(const Point&
     convex_path_vertex_rtree_.query(
         bgi::nearest(point, 1) && 
         bgi::satisfies([&](const std::pair<Point, size_t>& v) {
-            return bg::distance(point, v.first) <= 1e-7;
+            return bg::distance(point, v.first) <= graph_vertex_snapping_tolerance_;
         }),
         std::back_inserter(candidates)
     );

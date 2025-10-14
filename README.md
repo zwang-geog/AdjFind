@@ -2,9 +2,9 @@
 
 This repository contains the source code for the AdjFind project, a C++ application that provides specialized transportation network algorithms.
 
-• **Road Segmentation Mode**: Determines which service points (e.g., hydrants) are closest to each road segment using network distance, and optionally splits roads into discrete distance categories for service area analysis.
+• **Road Segmentation Mode**: Determines which service points (e.g., hydrants) are closest to each road segment using network distance, and optionally splits roads into discrete distance categories for service area analysis. [Learn More](https://medium.com/@zifanw9/still-measuring-proximity-using-point-buffers-try-this-new-tool-2a0e5cb7f5c8)
 
-• **Neighboring Points Mode**: Identifies the nearest neighboring service points along a road network in each direction, calculating spacing distances between facilities like hydrants for regulatory compliance assessment.
+• **Neighboring Points Mode**: Identifies the nearest neighboring service points along a road network in each direction, calculating spacing distances between facilities like hydrants for regulatory compliance assessment. [Learn More](https://medium.com/@zifanw9/want-to-know-the-adjacent-points-on-road-network-and-measure-spacing-try-adjfind-e28f63341b2a)
 
 • **Structure Access Mode**: Computes shortest unobstructed paths from building corners to road networks, finding the least accessible points on buildings for emergency response planning and fire code compliance.
 
@@ -173,6 +173,7 @@ The second output dataset is a point dataset with "_least_accessible_point" appe
 - `--road-ids-snappable-field <name>` - Optional field storing comma-separated road IDs in the building dataset. If this field exists and a feature has non-null field value, paths will only be possible to connect to those specified linestrings. If this field exists but a feature has null or empty field value, paths will be computed as usual with automatic candidate road linestring detection for the particular feature
 - `--min-polygon-boundary-segment-length-for-nearest-road-edge-detection <length>` - This parameter is only used when computing least-accessible-point in rare occasion, and it will not be used if road-ids-snappable-field value is specified for a feature. It is relevant when a polygon boundary segment is long (default: 80.0) and have a portions of points potentially closest to road linestrings that are not closest for any corner point; a sectional search with this length will be performed on the boundary segment to identify potentially previously unincluded candidate road linestrings
 - `--include-network-distance` - A flag variable that will include network distance in objective function of the path finding algorithm. Default (without explictly include this flag variable in command) is to find shortest unobstructed path from a point on building exterior to linestrings in road network (objective is to minimize the access_distance); this is ideal if we want to position fire trunks as close to building corners as possible to achieve sufficient water pressure. If this flag variable is included, objective is to minimize the distance_to_assigned_point (i.e., distance from a point on building exterior to hydrant, which includes both access distance and network distance); there is an additional constraint that forces the segment in unobstructed path linestring that connects to the road access point must be perpendicular to the road linestring
+- `--graph-vertex-snapping-tolerance <value>` - Distance tolerance for snapping graph vertices during path finding (default: 1e-6). **Note: This parameter has significant effect on the result.** When two vertices are within this tolerance distance, they are considered the same vertex in the graph
 - `--reproject-to-epsg4326` - A flag variable that will reproject output to EPSG:4326 (WGS84)
 
 **Example:**
@@ -247,12 +248,15 @@ cd build
 
 2. **Configure with CMake:**
 ```bash
-cmake ..
+cmake .. -DCMAKE_BUILD_TYPE=Release
+
+# If using conda environment, add CMAKE_PREFIX_PATH:
+cmake .. -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH=$CONDA_PREFIX
 ```
 
 3. **Build the project:**
 ```bash
-make -j$(nproc)  # On Linux/macOS
+cmake --build . --config Release -j$(nproc)  # On Linux/macOS
 # or
 cmake --build . --config Release  # On Windows
 ```
