@@ -19,12 +19,15 @@ struct PolygonReaderConfig {
     std::string file_path;                    // Input file path
     std::string id_field;                     // Field name for polygon ID (optional, uses FID if not specified)
     std::string is_obstacle_only_field;       // Field name for obstacle-only flag (optional)
-    std::string road_ids_snappable_field;     // Field name for comma-separated road IDs (optional)
+    std::string snappable_ids_field;          // Field name for comma-separated road IDs (when road dataset provided) or point IDs (when road dataset not provided)
     int layer_index;                          // Layer index to read (default: 0)
     double min_polygon_boundary_segment_length_for_nearest_road_edge_detection; // Minimum polygon boundary segment length for nearest road edge detection (default: 80.0)
+    double candidate_access_points_search_distance; // Buffer distance for point r-tree query when populating snappable point IDs (default: 1500.0); used only when road dataset is not provided
     
-    PolygonReaderConfig() : layer_index(0), min_polygon_boundary_segment_length_for_nearest_road_edge_detection(80.0) {}
+    PolygonReaderConfig() : layer_index(0), min_polygon_boundary_segment_length_for_nearest_road_edge_detection(80.0), candidate_access_points_search_distance(1500.0) {}
 };
+
+class PointReader;
 
 class PolygonReader {
 public:
@@ -91,6 +94,16 @@ public:
      * @param adj_graph Reference to AdjGraph for finding nearest edges
      */
     void populateSnappableRoadIds(graph::AdjGraph& adj_graph);
+    
+    /**
+     * Populate snappable point IDs for polygons that don't have them.
+     * For each building polygon, generalizes it with a bounding box, buffers it by
+     * candidate_access_points_search_distance, and calls PointReader::findPointsIntersectBoundingBox
+     * to query the point dataset. Populates snappable_point_ids only if not already populated by
+     * reading user-provided data from snappable_ids_field.
+     * @param point_reader PointReader that has already read data (r-tree built in readFeatures)
+     */
+    void populateSnappablePointIds(PointReader& point_reader);
     
     /**
      * Query the polygon R-tree to find polygons that intersect with a line segment
@@ -209,10 +222,10 @@ private:
      * @param geometry OGR polygon geometry
      * @param feature_id Feature ID
      * @param is_obstacle_only Whether this polygon is obstacle-only
-     * @param snappable_road_ids Vector of snappable road IDs
+     * @param snappable_ids Vector of snappable (edge or point) IDs that can be snapped to
      */
     void processSinglePolygon(OGRGeometryH geometry, size_t feature_id, bool is_obstacle_only, 
-                             const std::vector<size_t>& snappable_road_ids);
+                             const std::vector<size_t>& snappable_ids);
     
 };
 

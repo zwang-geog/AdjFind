@@ -113,17 +113,17 @@ struct PolygonFeature {
     std::vector<Point> outer_ring;         // Outer boundary points as boost geometry Point objects excluding duplicate closing point
     Polygon geometry;                       // Original polygon geometry
     std::optional<Polygon> shrink_geometry; // Shrunk geometry for intersection checking
-    std::vector<size_t> snappable_road_ids; // Road IDs that can be snapped to
+    std::vector<size_t> snappable_ids; // Road IDs that can be snapped to (when road dataset is provided), or point IDs that can be snapped to (when road dataset is not provided)
     bool is_obstacle_only;                  // Whether this polygon is obstacle-only
     std::unordered_map<size_t, std::vector<size_t>> interpolated_snappable_edge_indices_map; // Map of polygon outer ring point index to vector of edge indices
     
     PolygonFeature(size_t idx, size_t feat_id, const std::vector<Point>& outer, 
                    const Polygon& geom,
                    const std::optional<Polygon>& shrink = std::nullopt,
-                   const std::vector<size_t>& road_ids = std::vector<size_t>(),
+                   const std::vector<size_t>& snappable_ids = std::vector<size_t>(),
                    bool obstacle_only = false)
         : index(idx), feature_id(feat_id), outer_ring(outer), geometry(geom),
-          shrink_geometry(shrink), snappable_road_ids(road_ids), is_obstacle_only(obstacle_only), 
+          shrink_geometry(shrink), snappable_ids(snappable_ids), is_obstacle_only(obstacle_only), 
           interpolated_snappable_edge_indices_map() {}
 };
 

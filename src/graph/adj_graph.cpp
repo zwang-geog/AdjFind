@@ -11,6 +11,11 @@ AdjGraph::AdjGraph()
     : next_vertex_id_(0), next_edge_id_(0) {
 }
 
+void AdjGraph::setCoordinateSystem(const std::string& wkt, int epsg) {
+    coordinate_system_wkt_ = wkt;
+    coordinate_system_epsg_ = epsg;
+}
+
 size_t AdjGraph::addVertex(const Point3D& geometry, VertexType type, size_t feature_id) {
     // For point vertices (snapped points), we want to create unique vertices
     // For intersection vertices, we use spatial tolerance

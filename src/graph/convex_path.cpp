@@ -138,6 +138,57 @@ bool ConvexPath::processConvexPathMode(const io::RoadReaderConfig& road_config,
     return true;
 }
 
+bool ConvexPath::processConvexPathModeNoRoad(const io::PointReaderConfig& point_config,
+                                             const io::PolygonReaderConfig& building_config) {
+    std::cout << "Starting ConvexPath processing (no road)..." << std::endl;
+    
+    // Step 1: Initialize and read building dataset
+    if (!initializeBuildingDataset(building_config)) {
+        std::cerr << "Error: Failed to initialize building dataset" << std::endl;
+        return false;
+    }
+    
+    // Step 2: Read point dataset (r-tree built in readFeatures)
+    // Use local variable like readAndSnapPointToRoad does - only needed for populateSnappablePointIds
+    io::PointReader point_reader(point_config);
+    if (!point_reader.read()) {
+        std::cerr << "Error: Failed to read point dataset" << std::endl;
+        return false;
+    }
+    
+    // Coordinate system validation between building and point
+    // Note: This validation uses the readers' coordinate systems directly, not AdjGraph's
+    int building_epsg = building_reader_->getCoordinateSystemEPSG();
+    int point_epsg = point_reader.getCoordinateSystemEPSG();
+    if (building_epsg != point_epsg) {
+        std::cerr << "Error: Coordinate system mismatch. Building: EPSG:" << building_epsg
+                  << ", Point: EPSG:" << point_epsg << std::endl;
+        return false;
+    }
+    
+    // Set coordinate system in AdjGraph for output writing (getCoordinateSystemWKT() called by writer)
+    // This is separate from validation above, which uses readers' coordinate systems directly
+    setCoordinateSystem(building_reader_->getCoordinateSystemWKT(), building_reader_->getCoordinateSystemEPSG());
+    
+    // Step 3: Populate snappable point IDs for buildings (uses PointReader::findPointsIntersectBoundingBox)
+    std::cout << "Populating snappable point IDs for buildings..." << std::endl;
+    building_reader_->populateSnappablePointIds(point_reader);
+    
+    // Step 4: Move points vector from reader (r-tree and dataset no longer needed)
+    // After moving points, point_reader will be destroyed when it goes out of scope,
+    // which will close the dataset in its destructor. We keep points as a local variable
+    // since only this method needs it (processConvexPathMode doesn't use point features).
+    std::vector<graph::PointFeature> point_features = point_reader.movePoints();
+    std::cout << "Moved " << point_features.size() << " point features from reader" << std::endl;
+    
+    // point_reader goes out of scope here - destructor will close dataset_ and clean up
+    
+    // TODO: implement polygon processing and path finding to points (no road edges)
+    // Use point_features vector (contains point features indexed by snappable_ids in PolygonFeature)
+    std::cout << "processConvexPathModeNoRoad: building and point init completed. Polygon processing to points not yet implemented." << std::endl;
+    return true;
+}
+
 bool ConvexPath::initializeBuildingDataset(const io::PolygonReaderConfig& building_config) {
     try {
         building_reader_ = std::make_unique<io::PolygonReader>(building_config);
@@ -1013,8 +1064,8 @@ ConvexHullResult ConvexPath::generateConvexHullSegments(const PolygonFeature& po
                 else {
                     bool new_snapped_point_added = false;
                     std::vector<std::tuple<Point, double, double, size_t, size_t>> candidate_snapped_points_outside_segment;
-                    for (size_t snappable_road_id : polygon_feature.snappable_road_ids) {
-                        auto [snapped_point, dist_to_nearest_point, dist_to_closest_edge, nearest_point_vertex_position_index, edge_index, is_outside_segment] = computeSnappedPointOnEdge(snappable_road_id, end_hull_prev_point);
+                    for (size_t snappable_id : polygon_feature.snappable_ids) {
+                        auto [snapped_point, dist_to_nearest_point, dist_to_closest_edge, nearest_point_vertex_position_index, edge_index, is_outside_segment] = computeSnappedPointOnEdge(snappable_id, end_hull_prev_point);
                         if (bg::is_empty(snapped_point)) {
                             continue;
                         }
@@ -1056,8 +1107,8 @@ ConvexHullResult ConvexPath::generateConvexHullSegments(const PolygonFeature& po
                 else {
                     bool new_snapped_point_added2 = false;
                     std::vector<std::tuple<Point, double, double, size_t, size_t>> candidate_snapped_points_outside_segment2;
-                    for (size_t snappable_road_id : polygon_feature.snappable_road_ids) {
-                        auto [snapped_point2, dist_to_nearest_point2, dist_to_closest_edge2, nearest_point_vertex_position_index2, edge_index2, is_outside_segment2] = computeSnappedPointOnEdge(snappable_road_id, end_hull_next_point);
+                    for (size_t snappable_id : polygon_feature.snappable_ids) {
+                        auto [snapped_point2, dist_to_nearest_point2, dist_to_closest_edge2, nearest_point_vertex_position_index2, edge_index2, is_outside_segment2] = computeSnappedPointOnEdge(snappable_id, end_hull_next_point);
                         if (bg::is_empty(snapped_point2)) {
                             continue;
                         }
@@ -1125,8 +1176,8 @@ ConvexHullResult ConvexPath::generateConvexHullSegments(const PolygonFeature& po
                 std::vector<std::tuple<Point, double, double, size_t, size_t>> candidate_snapped_points_outside_segment;
                 bool new_snapped_point_added2 = false;
                 std::vector<std::tuple<Point, double, double, size_t, size_t>> candidate_snapped_points_outside_segment2;
-                for (size_t snappable_road_id : polygon_feature.snappable_road_ids) {
-                    auto [snapped_point, dist_to_nearest_point, dist_to_closest_edge, nearest_point_vertex_position_index, edge_index, is_outside_segment] = computeSnappedPointOnEdge(snappable_road_id, end_hull_prev_point);
+                for (size_t snappable_id : polygon_feature.snappable_ids) {
+                    auto [snapped_point, dist_to_nearest_point, dist_to_closest_edge, nearest_point_vertex_position_index, edge_index, is_outside_segment] = computeSnappedPointOnEdge(snappable_id, end_hull_prev_point);
                     if (!bg::is_empty(snapped_point)) {
                         if (is_outside_segment) {
                             candidate_snapped_points_outside_segment.emplace_back(snapped_point, dist_to_nearest_point, dist_to_closest_edge, nearest_point_vertex_position_index, edge_index);
@@ -1145,7 +1196,7 @@ ConvexHullResult ConvexPath::generateConvexHullSegments(const PolygonFeature& po
                         }
                     }
 
-                    auto [snapped_point2, dist_to_nearest_point2, dist_to_closest_edge2, nearest_point_vertex_position_index2, edge_index2, is_outside_segment2] = computeSnappedPointOnEdge(snappable_road_id, end_hull_next_point);
+                    auto [snapped_point2, dist_to_nearest_point2, dist_to_closest_edge2, nearest_point_vertex_position_index2, edge_index2, is_outside_segment2] = computeSnappedPointOnEdge(snappable_id, end_hull_next_point);
                     if (!bg::is_empty(snapped_point2)) {
                         if (is_outside_segment2) {
                             candidate_snapped_points_outside_segment2.emplace_back(snapped_point2, dist_to_nearest_point2, dist_to_closest_edge2, nearest_point_vertex_position_index2, edge_index2);
@@ -1260,7 +1311,7 @@ ConvexHullResult ConvexPath::generateConvexHullSegments(const PolygonFeature& po
     return result;
 }
 
-ConvexPathResult ConvexPath::findConvexPath(const Point& start_point, const std::vector<size_t>& snappable_road_ids) {
+ConvexPathResult ConvexPath::findConvexPath(const Point& start_point, const std::vector<size_t>& snappable_ids) {
     // Step 1: Try to snap the point to road edge
     clear();
 
@@ -1275,8 +1326,8 @@ ConvexPathResult ConvexPath::findConvexPath(const Point& start_point, const std:
     // Prioritizing adding edges that have snapped points on the road segments
     // Only add edges that have snapped points outside the segment if no other edges are added
     std::vector<std::tuple<Point, double, double, size_t, size_t>> candidate_snapped_points_outside_segment;
-    for (size_t snappable_road_id : snappable_road_ids) {
-        auto [initial_snapped_point, initial_dist_to_nearest_point, initial_dist_to_closest_edge, initial_nearest_point_vertex_position_index, initial_edge_index, initial_is_outside_segment] = computeSnappedPointOnEdge(snappable_road_id, start_point);
+    for (size_t snappable_id : snappable_ids) {
+        auto [initial_snapped_point, initial_dist_to_nearest_point, initial_dist_to_closest_edge, initial_nearest_point_vertex_position_index, initial_edge_index, initial_is_outside_segment] = computeSnappedPointOnEdge(snappable_id, start_point);
         if (bg::is_empty(initial_snapped_point)) {
             continue;
         }
@@ -1558,7 +1609,7 @@ std::tuple<std::vector<ConvexPathResult>, size_t, Point> ConvexPath::processSing
     for (size_t i = 0; i < polygon_feature.outer_ring.size(); ++i) { // polygon_feature.outer_ring already has last vertex dropped if it is the same as the first vertex
         const Point& vertex = polygon_feature.outer_ring[i];
         
-        auto path_result = findConvexPath(vertex, polygon_feature.snappable_road_ids);
+        auto path_result = findConvexPath(vertex, polygon_feature.snappable_ids);
 
         if (path_result.path_found) {
             path_result.start_point_type = ConvexPathResultType::BUILDING_CORNER;
@@ -1643,14 +1694,14 @@ std::tuple<std::vector<ConvexPathResult>, size_t, Point> ConvexPath::processSing
         
         if (polygon_feature.interpolated_snappable_edge_indices_map.find(i) != polygon_feature.interpolated_snappable_edge_indices_map.end()) {
             // Use sectional search for boundary segment with nearest road edge not detected with building corner
-            std::vector<size_t> merged_snappable_road_ids = polygon_feature.snappable_road_ids;
+            std::vector<size_t> merged_snappable_ids = polygon_feature.snappable_ids;
             const auto& interpolated_edges = polygon_feature.interpolated_snappable_edge_indices_map.at(i);
-            merged_snappable_road_ids.insert(merged_snappable_road_ids.end(),
+            merged_snappable_ids.insert(merged_snappable_ids.end(),
                                            interpolated_edges.begin(),
                                            interpolated_edges.end());
             auto search_result = sectionalSearch(point_i, point_next, 
                                                vertex_paths[i], vertex_paths[next_i],
-                                               max_distance, merged_snappable_road_ids);
+                                               max_distance, merged_snappable_ids);
             if (search_result.path_found && search_result.objective_distance > max_distance) {
                 max_distance = search_result.objective_distance;
                 max_total_length = search_result.total_length;
@@ -1691,7 +1742,7 @@ std::tuple<std::vector<ConvexPathResult>, size_t, Point> ConvexPath::processSing
             // Use sectional search for segments that intersect with convex hull
             auto search_result = sectionalSearch(point_i, point_next, 
                                                vertex_paths[i], vertex_paths[next_i],
-                                               max_distance, polygon_feature.snappable_road_ids);
+                                               max_distance, polygon_feature.snappable_ids);
             
             if (search_result.path_found && search_result.objective_distance > max_distance) {
                 max_distance = search_result.objective_distance;
@@ -1735,7 +1786,7 @@ ConvexPathResult ConvexPath::sectionalSearch(const Point& p1, const Point& p2,
                                             const ConvexPathResult& p1_path,
                                             const ConvexPathResult& p2_path,
                                             double max_distance,
-                                            const std::vector<size_t>& snappable_road_ids
+                                            const std::vector<size_t>& snappable_ids
                                         ) {
     /*
     By default, we will use 7 intervals to split the segment, which means 8 points (two endpoints and 6 intermediate points).
@@ -1822,7 +1873,7 @@ ConvexPathResult ConvexPath::sectionalSearch(const Point& p1, const Point& p2,
         
         for (size_t i = 1; i < sample_points_size - 1; ++i) {
             // Use the current ConvexPath instance directly
-            auto path = findConvexPath(sample_points[i], snappable_road_ids);
+            auto path = findConvexPath(sample_points[i], snappable_ids);
             
             sample_paths.push_back(path);
         }

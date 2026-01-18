@@ -76,7 +76,8 @@ void printUsage(const char* programName) {
               << "  --building-id-field <name>   Field name for building ID (defaults to OGR FID)\n"
               << "  --building-layer-index <index> Layer index to read from building file (default: 0)\n"
               << "  --is-obstacle-only-field <name> Field name for obstacle-only flag\n"
-              << "  --road-ids-snappable-field <name> Field name for comma-separated road IDs\n"
+              << "  --snappable-ids-field <name> Field name for comma-separated road IDs or point IDs (when road dataset not provided)\n"
+              << "  --candidate-access-points-search-distance <value> Buffer distance for candidate access points search when road dataset not provided (default: 1500)\n"
               << "  --min-polygon-boundary-segment-length-for-nearest-road-edge-detection <length> Minimum polygon boundary segment length for nearest road edge detection (default: 80.0)\n"
               << "  --include-network-distance    A flag argument that will include network distance in addition to access distance (structure-road) in the objective function of path finding algorithm (default: not included)\n"
               << "  --graph-vertex-snapping-tolerance <value> Distance tolerance for snapping graph vertices (default: 1e-6)\n"
@@ -154,7 +155,8 @@ void printDetailedHelp(const char* programName) {
               << "     --building-id-field <name>  Field name for building ID (defaults to OGR FID)\n"
               << "     --building-layer-index <index> Layer index to read from building file (default: 0)\n"
               << "     --is-obstacle-only-field <name> Field name for obstacle-only flag\n"
-              << "     --road-ids-snappable-field <name> Field name for comma-separated road IDs\n"
+              << "     --snappable-ids-field <name> Field name for comma-separated road IDs or point IDs (when road dataset not provided)\n"
+              << "     --candidate-access-points-search-distance <value> Buffer distance for candidate access points search when road dataset not provided (default: 1500)\n"
               << "     --min-polygon-boundary-segment-length-for-nearest-road-edge-detection <length> Minimum polygon boundary segment length (default: 80.0)\n"
               << "     --include-network-distance    Include network distance in objective function\n"
               << "     --graph-vertex-snapping-tolerance <value> Distance tolerance for snapping graph vertices (default: 1e-6)\n"
@@ -332,7 +334,23 @@ void processStructureAccessMode(const std::unordered_map<std::string, std::strin
     }
     
     std::string is_obstacle_only_field = args.count("is-obstacle-only-field") ? args.at("is-obstacle-only-field") : "";
-    std::string road_ids_snappable_field = args.count("road-ids-snappable-field") ? args.at("road-ids-snappable-field") : "";
+    // snappable_ids_field: prefer --snappable-ids-field; if not specified and road dataset is provided, use --road-ids-snappable-field for backward compatibility
+    std::string snappable_ids_field = args.count("snappable-ids-field") ? args.at("snappable-ids-field") : (args.count("road-ids-snappable-field") ? args.at("road-ids-snappable-field") : "");
+    
+    // Parse candidate-access-points-search-distance (used only when road dataset is not provided; default 1500)
+    double candidate_access_points_search_distance = 1500.0;
+    if (args.count("candidate-access-points-search-distance") > 0) {
+        try {
+            candidate_access_points_search_distance = std::stod(args.at("candidate-access-points-search-distance"));
+            if (candidate_access_points_search_distance <= 0) {
+                std::cerr << "Error: candidate-access-points-search-distance must be positive" << std::endl;
+                return;
+            }
+        } catch (const std::exception& e) {
+            std::cerr << "Error: Invalid candidate-access-points-search-distance: " << e.what() << std::endl;
+            return;
+        }
+    }
     
     // Parse min polygon boundary segment length for nearest road edge detection
     double min_polygon_boundary_segment_length = 80.0; // Default value
@@ -391,7 +409,8 @@ void processStructureAccessMode(const std::unordered_map<std::string, std::strin
     building_config.file_path = building_file_path;
     building_config.id_field = building_id_field;
     building_config.is_obstacle_only_field = is_obstacle_only_field;
-    building_config.road_ids_snappable_field = road_ids_snappable_field;
+    building_config.snappable_ids_field = snappable_ids_field;
+    building_config.candidate_access_points_search_distance = candidate_access_points_search_distance;
     building_config.layer_index = building_layer_index;
     building_config.min_polygon_boundary_segment_length_for_nearest_road_edge_detection = min_polygon_boundary_segment_length;
     

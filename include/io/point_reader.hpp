@@ -57,6 +57,13 @@ public:
     const std::vector<graph::PointFeature>& getPointFeatures() const { return points_; }
     
     /**
+     * Move the points vector out of the reader (for transferring ownership after r-tree is no longer needed)
+     * After calling this, the reader's points_ vector will be empty and the r-tree should be cleared
+     * @return Moved vector of point features
+     */
+    std::vector<graph::PointFeature> movePoints();
+    
+    /**
      * Get the coordinate system WKT string
      * @return Coordinate system WKT string
      */
@@ -83,6 +90,14 @@ public:
      * Clear all point data to free memory
      */
     void clearPoints();
+    
+    /**
+     * Query the point r-tree for points whose geometry intersects the given bounding box.
+     * Uses the spatial index built in readFeatures()/buildSpatialIndex().
+     * @param box Bounding box to query (in same CRS as point dataset)
+     * @return Vector of point feature indices (positions in points_ vector) that intersect the box
+     */
+    std::vector<size_t> findPointsIntersectBoundingBox(const graph::Box& box) const;
 
 private:
     PointReaderConfig config_;
