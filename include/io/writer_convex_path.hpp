@@ -18,8 +18,9 @@ struct ConvexPathWriterConfig {
     std::string output_file_path;     // Output file path with extension
     std::string crs_wkt;              // Coordinate reference system WKT (optional)
     bool reproject_to_epsg4326;       // Whether to reproject output to EPSG:4326
+    bool use_road_data;               // Whether road data was used (affects which fields are created)
     
-    ConvexPathWriterConfig() : reproject_to_epsg4326(false) {}
+    ConvexPathWriterConfig() : reproject_to_epsg4326(false), use_road_data(true) {}
 };
 
 /**

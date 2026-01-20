@@ -292,7 +292,8 @@ void processRoadSegmentationMode(const std::unordered_map<std::string, std::stri
 
 void processStructureAccessMode(const std::unordered_map<std::string, std::string>& args) {
     // Parse required arguments
-    std::string road_file_path = args.at("road-file-path");
+    bool has_road_file = args.count("road-file-path") > 0;
+    std::string road_file_path = has_road_file ? args.at("road-file-path") : "";
     std::string point_file_path = args.at("point-file-path");
     std::string building_file_path = args.at("building-file-path");
     
@@ -389,17 +390,6 @@ void processStructureAccessMode(const std::unordered_map<std::string, std::strin
         }
     }
     
-    // Create configurations
-    io::RoadReaderConfig road_config;
-    road_config.file_path = road_file_path;
-    road_config.id_field = road_id_field;
-    road_config.from_z_field = road_from_z_field;
-    road_config.to_z_field = road_to_z_field;
-    road_config.length_field = road_length_field;
-    road_config.default_from_z = 0.0;  // Always default to 0.0
-    road_config.default_to_z = 0.0;    // Always default to 0.0
-    road_config.layer_index = road_layer_index;
-    
     io::PointReaderConfig point_config;
     point_config.file_path = point_file_path;
     point_config.id_field = point_id_field;
@@ -425,7 +415,26 @@ void processStructureAccessMode(const std::unordered_map<std::string, std::strin
     convex_path.setGraphVertexSnappingTolerance(graph_vertex_snapping_tolerance);
     std::cout << "Graph vertex snapping tolerance set to: " << graph_vertex_snapping_tolerance << std::endl;
     
-    if (!convex_path.processConvexPathMode(road_config, point_config, building_config)) {
+    bool success = false;
+    if (has_road_file) {
+        // Create road configuration
+        io::RoadReaderConfig road_config;
+        road_config.file_path = road_file_path;
+        road_config.id_field = road_id_field;
+        road_config.from_z_field = road_from_z_field;
+        road_config.to_z_field = road_to_z_field;
+        road_config.length_field = road_length_field;
+        road_config.default_from_z = 0.0;  // Always default to 0.0
+        road_config.default_to_z = 0.0;    // Always default to 0.0
+        road_config.layer_index = road_layer_index;
+        
+        success = convex_path.processConvexPathMode(road_config, point_config, building_config);
+    } else {
+        // No road file provided, use processConvexPathModeNoRoad
+        success = convex_path.processConvexPathModeNoRoad(point_config, building_config);
+    }
+    
+    if (!success) {
         std::cerr << "Error processing structure access mode" << std::endl;
         return;
     }
@@ -436,6 +445,7 @@ void processStructureAccessMode(const std::unordered_map<std::string, std::strin
     writer_config.output_file_path = output_file;
     writer_config.crs_wkt = convex_path.getCoordinateSystemWKT();
     writer_config.reproject_to_epsg4326 = reproject_to_epsg4326;
+    writer_config.use_road_data = has_road_file;
     
     const auto& polygon_results = convex_path.getPolygonResults();
     
@@ -586,12 +596,6 @@ int main(int argc, char* argv[]) {
         }
         
         // Check for required arguments
-        if (args.count("road-file-path") == 0) {
-            std::cerr << "Error: --road-file-path is required" << std::endl;
-            printUsage(argv[0]);
-            return 1;
-        }
-        
         if (args.count("point-file-path") == 0) {
             std::cerr << "Error: --point-file-path is required" << std::endl;
             printUsage(argv[0]);
@@ -611,6 +615,13 @@ int main(int argc, char* argv[]) {
         }
         
         std::string mode = args.at("mode");
+        
+        // Check for road-file-path (required for all modes except structure-access)
+        if (mode != "structure-access" && args.count("road-file-path") == 0) {
+            std::cerr << "Error: --road-file-path is required for mode '" << mode << "'" << std::endl;
+            printUsage(argv[0]);
+            return 1;
+        }
         
         if (mode == "structure-access" && args.count("building-file-path") == 0) {
             std::cerr << "Error: --building-file-path is required for structure-access mode" << std::endl;

@@ -137,13 +137,16 @@ GDALDatasetH ConvexPathWriter::createLinestringDataset(const ConvexPathWriterCon
     OGR_L_CreateField(layer, assigned_point_feature_id_field, 1);
     OGR_Fld_Destroy(assigned_point_feature_id_field);
     
-    OGRFieldDefnH snapped_road_feature_id_field = OGR_Fld_Create("snapped_road_feature_id", OFTInteger64);
-    OGR_L_CreateField(layer, snapped_road_feature_id_field, 1);
-    OGR_Fld_Destroy(snapped_road_feature_id_field);
-    
-    OGRFieldDefnH distance_to_assigned_point_field = OGR_Fld_Create("distance_to_assigned_point", OFTReal);
-    OGR_L_CreateField(layer, distance_to_assigned_point_field, 1);
-    OGR_Fld_Destroy(distance_to_assigned_point_field);
+    // Only create road-related fields if road data was used
+    if (config.use_road_data) {
+        OGRFieldDefnH snapped_road_feature_id_field = OGR_Fld_Create("snapped_road_feature_id", OFTInteger64);
+        OGR_L_CreateField(layer, snapped_road_feature_id_field, 1);
+        OGR_Fld_Destroy(snapped_road_feature_id_field);
+        
+        OGRFieldDefnH distance_to_assigned_point_field = OGR_Fld_Create("distance_to_assigned_point", OFTReal);
+        OGR_L_CreateField(layer, distance_to_assigned_point_field, 1);
+        OGR_Fld_Destroy(distance_to_assigned_point_field);
+    }
     
     OGRFieldDefnH access_distance_field = OGR_Fld_Create("access_distance", OFTReal);
     OGR_L_CreateField(layer, access_distance_field, 1);
@@ -268,13 +271,16 @@ GDALDatasetH ConvexPathWriter::createPointDataset(const ConvexPathWriterConfig& 
     OGR_L_CreateField(layer, assigned_point_feature_id_field, 1);
     OGR_Fld_Destroy(assigned_point_feature_id_field);
     
-    OGRFieldDefnH snapped_road_feature_id_field = OGR_Fld_Create("snapped_road_feature_id", OFTInteger64);
-    OGR_L_CreateField(layer, snapped_road_feature_id_field, 1);
-    OGR_Fld_Destroy(snapped_road_feature_id_field);
-    
-    OGRFieldDefnH distance_to_assigned_point_field = OGR_Fld_Create("distance_to_assigned_point", OFTReal);
-    OGR_L_CreateField(layer, distance_to_assigned_point_field, 1);
-    OGR_Fld_Destroy(distance_to_assigned_point_field);
+    // Only create road-related fields if road data was used
+    if (config.use_road_data) {
+        OGRFieldDefnH snapped_road_feature_id_field = OGR_Fld_Create("snapped_road_feature_id", OFTInteger64);
+        OGR_L_CreateField(layer, snapped_road_feature_id_field, 1);
+        OGR_Fld_Destroy(snapped_road_feature_id_field);
+        
+        OGRFieldDefnH distance_to_assigned_point_field = OGR_Fld_Create("distance_to_assigned_point", OFTReal);
+        OGR_L_CreateField(layer, distance_to_assigned_point_field, 1);
+        OGR_Fld_Destroy(distance_to_assigned_point_field);
+    }
     
     OGRFieldDefnH access_distance_field = OGR_Fld_Create("access_distance", OFTReal);
     OGR_L_CreateField(layer, access_distance_field, 1);
@@ -330,18 +336,24 @@ bool ConvexPathWriter::writeLinestringFeature(GDALDatasetH dataset, OGRLayerH la
             OGR_F_SetFieldNull(feature, OGR_F_GetFieldIndex(feature, "assigned_point_feature_id"));
         }
         
-        // Set snapped_road_feature_id (using edge_index)
-        if (path_result.path_found && path_result.edge_index != std::numeric_limits<size_t>::max()) {
-            OGR_F_SetFieldInteger64(feature, OGR_F_GetFieldIndex(feature, "snapped_road_feature_id"), static_cast<GIntBig>(path_result.edge_index));
-        } else {
-            OGR_F_SetFieldNull(feature, OGR_F_GetFieldIndex(feature, "snapped_road_feature_id"));
+        // Set snapped_road_feature_id (using edge_index) - only if field exists (road data was used)
+        int snapped_road_field_idx = OGR_F_GetFieldIndex(feature, "snapped_road_feature_id");
+        if (snapped_road_field_idx >= 0) {
+            if (path_result.path_found && path_result.edge_index != std::numeric_limits<size_t>::max()) {
+                OGR_F_SetFieldInteger64(feature, snapped_road_field_idx, static_cast<GIntBig>(path_result.edge_index));
+            } else {
+                OGR_F_SetFieldNull(feature, snapped_road_field_idx);
+            }
         }
         
-        // Set distance_to_assigned_point
-        if (path_result.path_found) {
-            OGR_F_SetFieldDouble(feature, OGR_F_GetFieldIndex(feature, "distance_to_assigned_point"), path_result.total_length);
-        } else {
-            OGR_F_SetFieldNull(feature, OGR_F_GetFieldIndex(feature, "distance_to_assigned_point"));
+        // Set distance_to_assigned_point - only if field exists (road data was used)
+        int distance_field_idx = OGR_F_GetFieldIndex(feature, "distance_to_assigned_point");
+        if (distance_field_idx >= 0) {
+            if (path_result.path_found) {
+                OGR_F_SetFieldDouble(feature, distance_field_idx, path_result.total_length);
+            } else {
+                OGR_F_SetFieldNull(feature, distance_field_idx);
+            }
         }
         
         // Set access_distance (length of linestring geometry)
@@ -418,15 +430,21 @@ bool ConvexPathWriter::writePointFeature(GDALDatasetH dataset, OGRLayerH layer,
         OGR_F_SetFieldNull(feature, OGR_F_GetFieldIndex(feature, "assigned_point_feature_id"));
     }
     
-    // Set snapped_road_feature_id (using edge_index)
-    if (least_accessible_result->edge_index != std::numeric_limits<size_t>::max()) {
-        OGR_F_SetFieldInteger64(feature, OGR_F_GetFieldIndex(feature, "snapped_road_feature_id"), static_cast<GIntBig>(least_accessible_result->edge_index));
-    } else {
-        OGR_F_SetFieldNull(feature, OGR_F_GetFieldIndex(feature, "snapped_road_feature_id"));
+    // Set snapped_road_feature_id (using edge_index) - only if field exists (road data was used)
+    int snapped_road_field_idx = OGR_F_GetFieldIndex(feature, "snapped_road_feature_id");
+    if (snapped_road_field_idx >= 0) {
+        if (least_accessible_result->edge_index != std::numeric_limits<size_t>::max()) {
+            OGR_F_SetFieldInteger64(feature, snapped_road_field_idx, static_cast<GIntBig>(least_accessible_result->edge_index));
+        } else {
+            OGR_F_SetFieldNull(feature, snapped_road_field_idx);
+        }
     }
     
-    // Set distance_to_assigned_point
-    OGR_F_SetFieldDouble(feature, OGR_F_GetFieldIndex(feature, "distance_to_assigned_point"), least_accessible_result->total_length);
+    // Set distance_to_assigned_point - only if field exists (road data was used)
+    int distance_field_idx = OGR_F_GetFieldIndex(feature, "distance_to_assigned_point");
+    if (distance_field_idx >= 0) {
+        OGR_F_SetFieldDouble(feature, distance_field_idx, least_accessible_result->total_length);
+    }
     
     // Set access_distance (length of linestring geometry)
     if (least_accessible_result->path_found && !least_accessible_result->path_geometry.empty()) {

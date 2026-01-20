@@ -243,6 +243,13 @@ public:
      * @return Current graph vertex snapping tolerance
      */
     double getGraphVertexSnappingTolerance() const { return graph_vertex_snapping_tolerance_; }
+    
+    /**
+     * Get access point by index (used in processConvexPathModeNoRoad)
+     * @param index Index of the access point
+     * @return Optional PointFeature if index is valid, nullopt otherwise
+     */
+    std::optional<PointFeature> getAccessPoint(size_t index) const;
 
 private:
     /**
@@ -267,6 +274,9 @@ private:
     
     // Flag to track if building dataset has been initialized
     bool building_dataset_initialized_;
+    
+    // Flag to indicate whether road data is being used (true for processConvexPathMode, false for processConvexPathModeNoRoad)
+    bool useRoadData_;
     
     // Flag to include network distance information in output
     bool include_network_distance_;
@@ -296,6 +306,9 @@ private:
     
     // Results from polygon processing
     std::vector<std::tuple<std::vector<ConvexPathResult>, size_t, Point>> polygon_results_;
+    
+    // Access points (only used in processConvexPathModeNoRoad, not in processConvexPathMode)
+    std::vector<PointFeature> access_points_;
 };
 
 } // namespace graph

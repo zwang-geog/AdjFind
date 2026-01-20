@@ -14,12 +14,13 @@ namespace graph {
 namespace bg = boost::geometry;
 
 ConvexPath::ConvexPath()
-    : building_dataset_initialized_(false), include_network_distance_(false), graph_vertex_snapping_tolerance_(1e-6), next_convex_path_vertex_id_(0), polygon_split_next_vertex_id_(0) {
+    : building_dataset_initialized_(false), useRoadData_(true), include_network_distance_(false), graph_vertex_snapping_tolerance_(1e-6), next_convex_path_vertex_id_(0), polygon_split_next_vertex_id_(0) {
 }
 
 bool ConvexPath::processConvexPathMode(const io::RoadReaderConfig& road_config, 
                                       const io::PointReaderConfig& point_config,
                                       const io::PolygonReaderConfig& building_config) {
+    useRoadData_ = true;
     auto total_start_time = std::chrono::high_resolution_clock::now();
     std::cout << "Starting ConvexPath processing..." << std::endl;
     
@@ -92,7 +93,7 @@ bool ConvexPath::processConvexPathMode(const io::RoadReaderConfig& road_config,
     
     // Step 7: Process all polygons and collect results
     auto step7_start = std::chrono::high_resolution_clock::now();
-    std::cout << "Computing convex paths for all polygons..." << std::endl;
+    std::cout << "Computing convex paths for all non-obstacle polygons..." << std::endl;
     
     size_t total_polygons = building_reader_->getFeatureCount();
     
@@ -140,6 +141,8 @@ bool ConvexPath::processConvexPathMode(const io::RoadReaderConfig& road_config,
 
 bool ConvexPath::processConvexPathModeNoRoad(const io::PointReaderConfig& point_config,
                                              const io::PolygonReaderConfig& building_config) {
+    useRoadData_ = false;
+    auto total_start_time = std::chrono::high_resolution_clock::now();
     std::cout << "Starting ConvexPath processing (no road)..." << std::endl;
     
     // Step 1: Initialize and read building dataset
@@ -176,16 +179,53 @@ bool ConvexPath::processConvexPathModeNoRoad(const io::PointReaderConfig& point_
     
     // Step 4: Move points vector from reader (r-tree and dataset no longer needed)
     // After moving points, point_reader will be destroyed when it goes out of scope,
-    // which will close the dataset in its destructor. We keep points as a local variable
-    // since only this method needs it (processConvexPathMode doesn't use point features).
-    std::vector<graph::PointFeature> point_features = point_reader.movePoints();
-    std::cout << "Moved " << point_features.size() << " point features from reader" << std::endl;
+    // which will close the dataset in its destructor. Store as member variable so
+    // processSinglePolygon, findConvexPath, and sectionalSearch can access it.
+    access_points_ = point_reader.movePoints();
+    std::cout << "Moved " << access_points_.size() << " access points from reader" << std::endl;
     
     // point_reader goes out of scope here - destructor will close dataset_ and clean up
     
-    // TODO: implement polygon processing and path finding to points (no road edges)
-    // Use point_features vector (contains point features indexed by snappable_ids in PolygonFeature)
-    std::cout << "processConvexPathModeNoRoad: building and point init completed. Polygon processing to points not yet implemented." << std::endl;
+    // Step 5: Process all polygons and collect results
+    std::cout << "Computing convex paths for all non-obstacle polygons..." << std::endl;
+    
+    size_t total_polygons = building_reader_->getFeatureCount();
+    
+    // Create a local vector to collect results
+    std::vector<std::tuple<std::vector<ConvexPathResult>, size_t, Point>> local_polygon_results;
+    local_polygon_results.reserve(total_polygons);
+    
+    for (size_t i = 0; i < total_polygons; ++i) {
+        const auto& polygon_feature = building_reader_->getPolygonFeature(i);
+        
+        // Skip obstacle-only polygons
+        if (polygon_feature.is_obstacle_only) {
+            continue;
+        }
+        
+        std::cout << "Processing polygon " << (i + 1) << "/" << total_polygons 
+                    << " (ID: " << polygon_feature.feature_id << ")..." << std::endl;
+        
+        try {
+            auto result = processSinglePolygon(polygon_feature);
+            
+            local_polygon_results.push_back(result);
+        } catch (const std::exception& e) {
+            std::cerr << "Error processing polygon " << polygon_feature.feature_id 
+                        << ": " << e.what() << std::endl;
+            // Continue processing other polygons
+        }
+    }
+    
+    // Update the member variable with all collected results
+    polygon_results_ = std::move(local_polygon_results);
+    
+    // Total processing time
+    auto total_end_time = std::chrono::high_resolution_clock::now();
+    auto total_duration = std::chrono::duration_cast<std::chrono::seconds>(total_end_time - total_start_time);
+    
+    std::cout << "ConvexPath processing (no road) completed successfully!" << std::endl;
+    std::cout << "Total processing time: " << total_duration.count() << " s" << std::endl;
     return true;
 }
 
@@ -223,6 +263,9 @@ void ConvexPath::clear() {
     
     // Clear polygon processing results
     polygon_results_.clear();
+    
+    // Clear access points
+    access_points_.clear();
 }
 
 void ConvexPath::clearPolygonSplitGraph() {
@@ -232,6 +275,13 @@ void ConvexPath::clearPolygonSplitGraph() {
     added_polygon_split_edges_.clear();
     polygon_split_vertex_rtree_.clear();
     polygon_split_next_vertex_id_ = 0;
+}
+
+std::optional<PointFeature> ConvexPath::getAccessPoint(size_t index) const {
+    if (index >= access_points_.size()) {
+        return std::nullopt;
+    }
+    return access_points_[index];
 }
 
 size_t ConvexPath::findOrCreateConvexPathGraphVertex(const Point& point) {
@@ -1058,7 +1108,7 @@ ConvexHullResult ConvexPath::generateConvexHullSegments(const PolygonFeature& po
             }
 
             if (end_hull_prev_to_be_added) {
-                if (!end_point_is_last_path_point) {
+                if (!end_point_is_last_path_point || !useRoadData_) {
                     result.candidate_edges.emplace_back(loop_end_vertex_id, end_point_vertex_id, EdgeType::CONNECTION_TO_END);
                 }
                 else {
@@ -1101,7 +1151,7 @@ ConvexHullResult ConvexPath::generateConvexHullSegments(const PolygonFeature& po
             }
 
             if (end_hull_next_to_be_added) {
-                if (!end_point_is_last_path_point) {
+                if (!end_point_is_last_path_point || !useRoadData_) {
                     result.candidate_edges.emplace_back(loop_start_vertex_id, end_point_vertex_id, EdgeType::CONNECTION_TO_END);
                 }
                 else {
@@ -1148,7 +1198,7 @@ ConvexHullResult ConvexPath::generateConvexHullSegments(const PolygonFeature& po
         result.is_concave_case = false;
         
         if (hull_outer_ring.size() > 2) {
-            if (!end_point_is_last_path_point) {
+            if (!end_point_is_last_path_point || !useRoadData_) {
                 // Find or create vertex for the first point outside the loop
                 size_t prev_vertex_id = findOrCreateConvexPathGraphVertex(hull_outer_ring[0]);
                 hull_vertex_ids.insert(prev_vertex_id);
@@ -1322,55 +1372,87 @@ ConvexPathResult ConvexPath::findConvexPath(const Point& start_point, const std:
     convex_path_vertices_.emplace_back(start_point, root_end_vertex_id);  // Technically, the geometry of this vertex is dummy and use start point as a placeholder
     // Do not insert into r-tree as this vertex to avoid conflict with initial_snapped_point_vertex_id
 
-    // For each possible snappable road edge, perform sanpping and add a convex path edge to account all possible network paths
-    // Prioritizing adding edges that have snapped points on the road segments
-    // Only add edges that have snapped points outside the segment if no other edges are added
-    std::vector<std::tuple<Point, double, double, size_t, size_t>> candidate_snapped_points_outside_segment;
-    for (size_t snappable_id : snappable_ids) {
-        auto [initial_snapped_point, initial_dist_to_nearest_point, initial_dist_to_closest_edge, initial_nearest_point_vertex_position_index, initial_edge_index, initial_is_outside_segment] = computeSnappedPointOnEdge(snappable_id, start_point);
-        if (bg::is_empty(initial_snapped_point)) {
-            continue;
+    if (useRoadData_) {
+        // For each possible snappable road edge, perform sanpping and add a convex path edge to account all possible network paths
+        // Prioritizing adding edges that have snapped points on the road segments
+        // Only add edges that have snapped points outside the segment if no other edges are added
+        std::vector<std::tuple<Point, double, double, size_t, size_t>> candidate_snapped_points_outside_segment;
+        for (size_t snappable_id : snappable_ids) {
+            auto [initial_snapped_point, initial_dist_to_nearest_point, initial_dist_to_closest_edge, initial_nearest_point_vertex_position_index, initial_edge_index, initial_is_outside_segment] = computeSnappedPointOnEdge(snappable_id, start_point);
+            if (bg::is_empty(initial_snapped_point)) {
+                continue;
+            }
+            if (initial_is_outside_segment) {
+                candidate_snapped_points_outside_segment.emplace_back(initial_snapped_point, initial_dist_to_nearest_point, initial_dist_to_closest_edge, initial_nearest_point_vertex_position_index, initial_edge_index);
+                continue;
+            }
+
+            size_t initial_snapped_point_vertex_id = next_convex_path_vertex_id_++;
+            convex_path_vertices_.emplace_back(initial_snapped_point, initial_snapped_point_vertex_id);
+            convex_path_vertex_rtree_.insert(std::make_pair(initial_snapped_point, initial_snapped_point_vertex_id));
+
+            // Add the initial direct connection between start and snapped points
+            addSegmentToConvexPathGraph(root_start_vertex_id, initial_snapped_point_vertex_id, false); // First edge, no need to check duplicate
+
+            // Manually add the edge between snapped point and artificial vertex
+            ConvexPathEdgePair second_edge_pair(initial_snapped_point_vertex_id, root_end_vertex_id);
+            added_convex_path_edges_.insert(second_edge_pair);
+            convex_path_edges_.emplace_back(initial_snapped_point_vertex_id, root_end_vertex_id, initial_dist_to_nearest_point, false, EdgeType::CONNECTION_TO_END, initial_nearest_point_vertex_position_index, initial_edge_index);
+            
         }
-        if (initial_is_outside_segment) {
-            candidate_snapped_points_outside_segment.emplace_back(initial_snapped_point, initial_dist_to_nearest_point, initial_dist_to_closest_edge, initial_nearest_point_vertex_position_index, initial_edge_index);
-            continue;
-        }
 
-        size_t initial_snapped_point_vertex_id = next_convex_path_vertex_id_++;
-        convex_path_vertices_.emplace_back(initial_snapped_point, initial_snapped_point_vertex_id);
-        convex_path_vertex_rtree_.insert(std::make_pair(initial_snapped_point, initial_snapped_point_vertex_id));
+        // If no snapped point that is on the segment is found, we need to add edges that have snapped points outside the segment
+        if (next_convex_path_vertex_id_ == 2) {
+            if (candidate_snapped_points_outside_segment.size() > 0) {
+                for (const auto& [initial_snapped_point, initial_dist_to_nearest_point, initial_dist_to_closest_edge, initial_nearest_point_vertex_position_index, initial_edge_index] : candidate_snapped_points_outside_segment) {
+                    size_t initial_snapped_point_vertex_id = next_convex_path_vertex_id_++;
+                    convex_path_vertices_.emplace_back(initial_snapped_point, initial_snapped_point_vertex_id);
+                    convex_path_vertex_rtree_.insert(std::make_pair(initial_snapped_point, initial_snapped_point_vertex_id));
 
-        // Add the initial direct connection between start and snapped points
-        addSegmentToConvexPathGraph(root_start_vertex_id, initial_snapped_point_vertex_id, false); // First edge, no need to check duplicate
+                    // Add the initial direct connection between start and snapped points
+                    addSegmentToConvexPathGraph(root_start_vertex_id, initial_snapped_point_vertex_id, false); // First edge, no need to check duplicate
 
-        // Manually add the edge between snapped point and artificial vertex
-        ConvexPathEdgePair second_edge_pair(initial_snapped_point_vertex_id, root_end_vertex_id);
-        added_convex_path_edges_.insert(second_edge_pair);
-        convex_path_edges_.emplace_back(initial_snapped_point_vertex_id, root_end_vertex_id, initial_dist_to_nearest_point, false, EdgeType::CONNECTION_TO_END, initial_nearest_point_vertex_position_index, initial_edge_index);
-        
-    }
-
-    // If no snapped point that is on the segment is found, we need to add edges that have snapped points outside the segment
-    if (next_convex_path_vertex_id_ == 2) {
-        if (candidate_snapped_points_outside_segment.size() > 0) {
-            for (const auto& [initial_snapped_point, initial_dist_to_nearest_point, initial_dist_to_closest_edge, initial_nearest_point_vertex_position_index, initial_edge_index] : candidate_snapped_points_outside_segment) {
-                size_t initial_snapped_point_vertex_id = next_convex_path_vertex_id_++;
-                convex_path_vertices_.emplace_back(initial_snapped_point, initial_snapped_point_vertex_id);
-                convex_path_vertex_rtree_.insert(std::make_pair(initial_snapped_point, initial_snapped_point_vertex_id));
-
-                // Add the initial direct connection between start and snapped points
-                addSegmentToConvexPathGraph(root_start_vertex_id, initial_snapped_point_vertex_id, false); // First edge, no need to check duplicate
-
-                // Manually add the edge between snapped point and artificial vertex
-                ConvexPathEdgePair second_edge_pair(initial_snapped_point_vertex_id, root_end_vertex_id);
-                added_convex_path_edges_.insert(second_edge_pair);
-                convex_path_edges_.emplace_back(initial_snapped_point_vertex_id, root_end_vertex_id, initial_dist_to_nearest_point, false, EdgeType::CONNECTION_TO_END, initial_nearest_point_vertex_position_index, initial_edge_index);
-                
+                    // Manually add the edge between snapped point and artificial vertex
+                    ConvexPathEdgePair second_edge_pair(initial_snapped_point_vertex_id, root_end_vertex_id);
+                    added_convex_path_edges_.insert(second_edge_pair);
+                    convex_path_edges_.emplace_back(initial_snapped_point_vertex_id, root_end_vertex_id, initial_dist_to_nearest_point, false, EdgeType::CONNECTION_TO_END, initial_nearest_point_vertex_position_index, initial_edge_index);
+                    
+                }
+            }
+            else {
+                // Return empty result when snapping fails
+                return ConvexPathResult();
             }
         }
-        else {
-            // Return empty result when snapping fails
+    } else {
+        // Process access points (no road data)
+        if (snappable_ids.empty()) {
+            // Return empty result when no snappable points
             return ConvexPathResult();
+        }
+
+        for (size_t snappable_id : snappable_ids) {
+            auto access_point_opt = getAccessPoint(snappable_id);
+            if (!access_point_opt.has_value()) {
+                std::cerr << "Warning: Access point with index " << snappable_id << " not found" << std::endl;
+                continue;
+            }
+            
+            const auto& access_point = access_point_opt.value();
+            const Point& access_point_location = access_point.geometry;
+            
+            // Create vertex for access point
+            size_t access_point_vertex_id = next_convex_path_vertex_id_++;
+            convex_path_vertices_.emplace_back(access_point_location, access_point_vertex_id);
+            convex_path_vertex_rtree_.insert(std::make_pair(access_point_location, access_point_vertex_id));
+
+            // Add the initial direct connection between start and access point
+            addSegmentToConvexPathGraph(root_start_vertex_id, access_point_vertex_id, false); // First edge, no need to check duplicate
+
+            // Manually add the edge between access point and artificial vertex
+            ConvexPathEdgePair second_edge_pair(access_point_vertex_id, root_end_vertex_id);
+            added_convex_path_edges_.insert(second_edge_pair);
+            convex_path_edges_.emplace_back(access_point_vertex_id, root_end_vertex_id, 0.0, false, EdgeType::CONNECTION_TO_END, snappable_id, snappable_id);
         }
     }
 
@@ -1774,8 +1856,20 @@ std::tuple<std::vector<ConvexPathResult>, size_t, Point> ConvexPath::processSing
     // Loop through all vertex paths, if path found, convert nearest_point_vertex_position_index and edge_index to feature_id
     for (auto& path : vertex_paths) {
         if (path.path_found) {
-            path.nearest_point_vertex_position_index = getVertex(path.nearest_point_vertex_position_index).feature_id;
-            path.edge_index = getEdge(path.edge_index).feature_id;
+            if (useRoadData_) {
+                // Road data case: convert vertex/edge indices to feature IDs
+                path.nearest_point_vertex_position_index = getVertex(path.nearest_point_vertex_position_index).feature_id;
+                path.edge_index = getEdge(path.edge_index).feature_id;
+            } else {
+                // No road data case: nearest_point_vertex_position_index and edge_index are both set to snappable_id (vector index)
+                // Convert to actual feature ID from access_points_
+                size_t snappable_id = path.nearest_point_vertex_position_index;
+                auto access_point_opt = getAccessPoint(snappable_id);
+                if (access_point_opt.has_value()) {
+                    path.nearest_point_vertex_position_index = access_point_opt.value().id;
+                    path.edge_index = access_point_opt.value().id;  // Same as nearest_point for access points
+                }
+            }
         }
     }
 
