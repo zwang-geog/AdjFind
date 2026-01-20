@@ -81,6 +81,7 @@ void printUsage(const char* programName) {
               << "  --min-polygon-boundary-segment-length-for-nearest-road-edge-detection <length> Minimum polygon boundary segment length for nearest road edge detection (default: 80.0)\n"
               << "  --include-network-distance    A flag argument that will include network distance in addition to access distance (structure-road) in the objective function of path finding algorithm (default: not included)\n"
               << "  --graph-vertex-snapping-tolerance <value> Distance tolerance for snapping graph vertices (default: 1e-6)\n"
+              << "  --output-road-access-point    A flag argument to output road access point file (last point of each path linestring) when road dataset is provided (default: false)\n"
               << "\nFor neighboring-points mode, additional optional arguments:\n"
               << "  --intersection-vertex-distance-threshold <value> Any point snapped to within this threshold from a road intersection will be subject to neighbor search from all outgoing directions from the intersection (default: 60.0)\n"
               << "  --cutoff <value>               If the path distance exceeds this cutoff and still no neighbor found along a given travel direction, the search along this direction will stop\n"
@@ -160,6 +161,7 @@ void printDetailedHelp(const char* programName) {
               << "     --min-polygon-boundary-segment-length-for-nearest-road-edge-detection <length> Minimum polygon boundary segment length (default: 80.0)\n"
               << "     --include-network-distance    Include network distance in objective function\n"
               << "     --graph-vertex-snapping-tolerance <value> Distance tolerance for snapping graph vertices (default: 1e-6)\n"
+              << "     --output-road-access-point    Output road access point file (last point of each path linestring) when road dataset is provided (default: false)\n"
               << "     --reproject-to-epsg4326     Reproject output to EPSG:4326 (WGS84)\n\n"
               << "   Example:\n"
               << "     " << programName << " --road-file-path roads.gpkg --point-file-path points.gpkg --building-file-path buildings.gpkg --mode structure-access --output-file structure_results.geojson\n\n"
@@ -204,6 +206,31 @@ std::unordered_map<std::string, std::string> parseArgs(int argc, char* argv[]) {
     return args;
 }
 
+// Helper function to parse boolean flag values
+// Returns true if flag exists and value is "true" (case-insensitive), false otherwise
+bool parseBooleanFlag(const std::unordered_map<std::string, std::string>& args, const std::string& flag_name, bool default_value = false) {
+    if (args.count(flag_name) == 0) {
+        return default_value;
+    }
+    
+    std::string value = args.at(flag_name);
+    // Convert to lowercase for case-insensitive comparison
+    std::transform(value.begin(), value.end(), value.begin(), ::tolower);
+    
+    // Check for true values
+    if (value == "true" || value == "1" || value == "yes" || value == "on") {
+        return true;
+    }
+    
+    // Check for false values
+    if (value == "false" || value == "0" || value == "no" || value == "off" || value.empty()) {
+        return false;
+    }
+    
+    // If value is provided but not recognized, default to true (for backward compatibility with flag-only usage)
+    return true;
+}
+
 void processRoadSegmentationMode(const std::unordered_map<std::string, std::string>& args) {
     // Parse required arguments
     std::string road_file_path = args.at("road-file-path");
@@ -244,7 +271,7 @@ void processRoadSegmentationMode(const std::unordered_map<std::string, std::stri
     
     // Parse output arguments
     std::string output_file = args.count("output-file") ? args.at("output-file") : "output.geojson";
-    bool reproject_to_epsg4326 = args.count("reproject-to-epsg4326") > 0;
+    bool reproject_to_epsg4326 = parseBooleanFlag(args, "reproject-to-epsg4326", false);
     
     // Parse distance breakpoints (optional)
     std::vector<double> distance_breakpoints;
@@ -370,10 +397,13 @@ void processStructureAccessMode(const std::unordered_map<std::string, std::strin
     
     // Parse output arguments
     std::string output_file = args.count("output-file") ? args.at("output-file") : "output.geojson";
-    bool reproject_to_epsg4326 = args.count("reproject-to-epsg4326") > 0;
+    bool reproject_to_epsg4326 = parseBooleanFlag(args, "reproject-to-epsg4326", false);
     
     // Parse include-network-distance flag
-    bool include_network_distance = args.count("include-network-distance") > 0;
+    bool include_network_distance = parseBooleanFlag(args, "include-network-distance", false);
+    
+    // Parse output-road-access-point flag
+    bool output_road_access_point = parseBooleanFlag(args, "output-road-access-point", false);
     
     // Parse graph-vertex-snapping-tolerance
     double graph_vertex_snapping_tolerance = 1e-6; // Default value
@@ -446,6 +476,7 @@ void processStructureAccessMode(const std::unordered_map<std::string, std::strin
     writer_config.crs_wkt = convex_path.getCoordinateSystemWKT();
     writer_config.reproject_to_epsg4326 = reproject_to_epsg4326;
     writer_config.use_road_data = has_road_file;
+    writer_config.output_road_access_point = output_road_access_point;
     
     const auto& polygon_results = convex_path.getPolygonResults();
     
@@ -498,7 +529,7 @@ void processNeighboringPointsMode(const std::unordered_map<std::string, std::str
     
     // Parse output arguments
     std::string output_file = args.count("output-file") ? args.at("output-file") : "output.geojson";
-    bool reproject_to_epsg4326 = args.count("reproject-to-epsg4326") > 0;
+    bool reproject_to_epsg4326 = parseBooleanFlag(args, "reproject-to-epsg4326", false);
     
     // Parse neighboring points specific arguments
     double intersection_vertex_distance_threshold = 60.0; // Default value
@@ -588,9 +619,9 @@ int main(int argc, char* argv[]) {
         
         // Check for version flag
         if (args.count("version") > 0 || args.count("v") > 0) {
-            std::cout << "AdjFind v0.1.3\n";
+            std::cout << "AdjFind v0.2.0\n";
             std::cout << "Adjacency/Proximity Path Finding Tool\n";
-            std::cout << "Copyright (c) 2025 Zifan Wang\n";
+            std::cout << "Copyright (c) 2026 Zifan Wang\n";
             std::cout << "MIT License\n";
             return 0;
         }
