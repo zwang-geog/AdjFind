@@ -264,8 +264,9 @@ void ConvexPath::clear() {
     // Clear polygon processing results
     polygon_results_.clear();
     
-    // Clear access points
-    access_points_.clear();
+    // Note: access_points_ is NOT cleared here because it's needed across multiple
+    // findConvexPath calls (one for each polygon vertex). It should only be cleared
+    // when starting a new processConvexPathModeNoRoad call.
 }
 
 void ConvexPath::clearPolygonSplitGraph() {
