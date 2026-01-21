@@ -1,5 +1,6 @@
 #include "io/polygon_reader.hpp"
 #include "io/coordinate_system_utils.hpp"
+#include "io/point_reader.hpp"
 #include "graph/adj_graph.hpp"
 #include <gdal.h>
 #include <ogr_api.h>
@@ -8,6 +9,7 @@
 #include <algorithm>
 #include <unordered_set>
 #include <boost/geometry.hpp>
+#include <boost/geometry/index/rtree.hpp>
 #include <boost/geometry/strategies/buffer.hpp>
 #include <boost/geometry/geometries/box.hpp>
 
@@ -96,14 +98,14 @@ void PolygonReader::populateSnappableRoadIds(graph::AdjGraph& adj_graph) {
     // Just populate snappable road IDs for polygons that don't have them
     // If snappable road IDs are already populated, map them to edge indices
 
-    if (!config_.road_ids_snappable_field.empty()) {
+    if (!config_.snappable_ids_field.empty()) {
         adj_graph.buildFeatureIdMapping();
     }
 
     for (auto& polygon : polygons_) {
         // Even if obstacle-only, we still need to populate snappable road IDs because query will be made for obstacle as well
         
-        if (polygon.snappable_road_ids.empty()) {
+        if (polygon.snappable_ids.empty()) {
             std::vector<std::pair<std::optional<size_t>, graph::Point>> road_edge_index_vector; // Expand snappable_road_ids for later sectional search
             // Find nearest road edge for each point in the polygon's outer ring
             std::unordered_set<size_t> unique_road_ids;
@@ -116,11 +118,11 @@ void PolygonReader::populateSnappableRoadIds(graph::AdjGraph& adj_graph) {
             }
             
             // Convert to vector and assign
-            polygon.snappable_road_ids.assign(unique_road_ids.begin(), unique_road_ids.end());
+            polygon.snappable_ids.assign(unique_road_ids.begin(), unique_road_ids.end());
 
             // Loop through polygon.snappable_road_ids to obtain a set of unique nearest_point_vertex_position_index
             std::unordered_set<size_t> unique_nearest_point_vertex_position_indices;
-            for (size_t edge_index : polygon.snappable_road_ids) {
+            for (size_t edge_index : polygon.snappable_ids) {
                 // Get the edge directly using the edge index
                 graph::Edge edge = adj_graph.getEdge(edge_index);
                 if (edge.nearest_point_vertex_position_index != std::numeric_limits<size_t>::max()) {
@@ -167,7 +169,7 @@ void PolygonReader::populateSnappableRoadIds(graph::AdjGraph& adj_graph) {
                             auto nearest_edge = adj_graph.findNearestEdge(point);
                             if (nearest_edge.has_value()) {
                                 // Criteria 5: If the edge_index is already in polygon.snappable_road_ids, continue
-                                if (std::find(polygon.snappable_road_ids.begin(), polygon.snappable_road_ids.end(), nearest_edge.value()) != polygon.snappable_road_ids.end()) {
+                                if (std::find(polygon.snappable_ids.begin(), polygon.snappable_ids.end(), nearest_edge.value()) != polygon.snappable_ids.end()) {
                                     continue;
                                 }
 
@@ -215,19 +217,51 @@ void PolygonReader::populateSnappableRoadIds(graph::AdjGraph& adj_graph) {
             // Map snappable road IDs to edge indices
             // Collect all edge indices for the feature IDs
             std::unordered_set<size_t> unique_edge_indices;
-            for (size_t feature_id : polygon.snappable_road_ids) {
+            for (size_t feature_id : polygon.snappable_ids) {
                 std::vector<size_t> edge_indices = adj_graph.getEdgeIndicesForFeatureId(feature_id);
                 unique_edge_indices.insert(edge_indices.begin(), edge_indices.end());
             }
             
             // Update the polygon's snappable_road_ids with the mapped edge indices
-            polygon.snappable_road_ids.assign(unique_edge_indices.begin(), unique_edge_indices.end());
+            polygon.snappable_ids.assign(unique_edge_indices.begin(), unique_edge_indices.end());
         }
     }
     
-    // Clear feature ID mapping if road_ids_snappable_field is configured
-    if (!config_.road_ids_snappable_field.empty()) {
+    // Clear feature ID mapping if snappable_ids_field is configured
+    if (!config_.snappable_ids_field.empty()) {
         adj_graph.clearFeatureIdMapping();
+    }
+}
+
+void PolygonReader::populateSnappablePointIds(PointReader& point_reader) {
+    double distance = config_.candidate_access_points_search_distance;
+    
+    for (auto& polygon : polygons_) {
+        // Skip obstacle-only polygons - they don't need access points defined
+        if (polygon.is_obstacle_only) {
+            continue;
+        }
+        
+        // Skip if snappable_ids already populated by reading user-provided data from snappable_ids_field
+        if (!polygon.snappable_ids.empty()) {
+            continue;
+        }
+        
+        // Generalize polygon with bounding box
+        graph::Box poly_box;
+        bg::envelope(polygon.geometry, poly_box);
+        
+        // Buffer the bounding box by candidate_access_points_search_distance (simple math: expand each side)
+        double min_x = bg::get<0>(poly_box.min_corner()) - distance;
+        double min_y = bg::get<1>(poly_box.min_corner()) - distance;
+        double max_x = bg::get<0>(poly_box.max_corner()) + distance;
+        double max_y = bg::get<1>(poly_box.max_corner()) + distance;
+        graph::Box query_box(graph::Point(min_x, min_y), graph::Point(max_x, max_y));
+        
+        // Query PointReader's r-tree (built in readFeatures) for points within the buffered box
+        // Returns point feature indices (positions in points_ vector), not feature IDs
+        std::vector<size_t> point_indices = point_reader.findPointsIntersectBoundingBox(query_box);
+        polygon.snappable_ids = std::move(point_indices);
     }
 }
 
@@ -294,26 +328,26 @@ bool PolygonReader::readFeatures() {
             is_obstacle_only = getFieldValueAsBool(feature, config_.is_obstacle_only_field, false);
         }
         
-        // Get snappable road IDs
-        std::vector<size_t> snappable_road_ids;
-        if (!config_.road_ids_snappable_field.empty()) {
-            std::string road_ids_str = getFieldValueAsString(feature, config_.road_ids_snappable_field);
+        // Get snappable road IDs (from snappable_ids_field; when road dataset is provided these are road IDs)
+        std::vector<size_t> snappable_ids;
+        if (!config_.snappable_ids_field.empty()) {
+            std::string road_ids_str = getFieldValueAsString(feature, config_.snappable_ids_field);
             if (!road_ids_str.empty()) {
-                snappable_road_ids = parseRoadIds(road_ids_str);
+                snappable_ids = parseRoadIds(road_ids_str);
             }
         }
         
         // Process the geometry - handle both single polygons and multipolygons
         if (geom_type == wkbPolygon || geom_type == wkbPolygon25D) {
             // Single polygon
-            processSinglePolygon(geometry, feature_id, is_obstacle_only, snappable_road_ids);
+            processSinglePolygon(geometry, feature_id, is_obstacle_only, snappable_ids);
         } else if (geom_type == wkbMultiPolygon || geom_type == wkbMultiPolygon25D) {
             // Multipolygon - use only the first polygon
             if (OGR_G_GetGeometryCount(geometry) > 0) {
                 OGRGeometryH first_polygon = OGR_G_GetGeometryRef(geometry, 0);
                 if (first_polygon && (OGR_G_GetGeometryType(first_polygon) == wkbPolygon || 
                                      OGR_G_GetGeometryType(first_polygon) == wkbPolygon25D)) {
-                    processSinglePolygon(first_polygon, feature_id, is_obstacle_only, snappable_road_ids);
+                    processSinglePolygon(first_polygon, feature_id, is_obstacle_only, snappable_ids);
                 } else {
                     std::cout << "Warning: Invalid first polygon in multipolygon feature " << feature_id << ". Skipping." << std::endl;
                 }
@@ -652,7 +686,7 @@ std::optional<graph::Polygon> PolygonReader::computeShrinkGeometry(const graph::
 }
 
 void PolygonReader::processSinglePolygon(OGRGeometryH geometry, size_t feature_id, bool is_obstacle_only, 
-                                        const std::vector<size_t>& snappable_road_ids) {
+                                        const std::vector<size_t>& snappable_ids) {
     
     // Convert geometry to boost geometry polygon
     graph::Polygon boost_polygon = convertOGRToPolygon(geometry);
@@ -684,7 +718,7 @@ void PolygonReader::processSinglePolygon(OGRGeometryH geometry, size_t feature_i
     // Create polygon feature
     size_t index = polygons_.size();
     polygons_.emplace_back(index, feature_id, outer_ring, boost_polygon, shrink_geometry, 
-                          snappable_road_ids, is_obstacle_only);
+                          snappable_ids, is_obstacle_only);
 }
 
 } // namespace io

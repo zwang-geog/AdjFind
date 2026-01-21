@@ -3,6 +3,7 @@
 
 #include "graph/road_segmentation.hpp"
 #include "io/polygon_reader.hpp"
+#include "io/point_reader.hpp"
 #include <unordered_set>
 #include <vector>
 #include <optional>
@@ -30,6 +31,16 @@ public:
     bool processConvexPathMode(const io::RoadReaderConfig& road_config, 
                               const io::PointReaderConfig& point_config,
                               const io::PolygonReaderConfig& building_config);
+    
+    /**
+     * Process convex path mode with point and building configurations only (no road dataset).
+     * Uses PointReader::findPointsIntersectBoundingBox via PolygonReader::populateSnappablePointIds.
+     * @param point_config Point reader configuration
+     * @param building_config Building reader configuration
+     * @return true if successful, false otherwise
+     */
+    bool processConvexPathModeNoRoad(const io::PointReaderConfig& point_config,
+                                    const io::PolygonReaderConfig& building_config);
     
     /**
      * Find or create a vertex in the convex path graph
@@ -175,10 +186,10 @@ public:
     /**
      * Find convex path from start point using snappable road IDs
      * @param start_point The starting point for path finding
-     * @param snappable_road_ids Vector of road edge indices that can be snapped to
+     * @param snappable_ids Vector of snappable (edge or point) IDs that can be snapped to
      * @return ConvexPathResult containing the path geometry, edge indices, and total length
      */
-    ConvexPathResult findConvexPath(const Point& start_point, const std::vector<size_t>& snappable_road_ids);
+    ConvexPathResult findConvexPath(const Point& start_point, const std::vector<size_t>& snappable_ids);
 
     /**
      * Process a single polygon to find the least accessible point
@@ -194,14 +205,14 @@ public:
      * @param p1_path Path result for first vertex
      * @param p2_path Path result for second vertex
      * @param max_distance Maximum distance constraint
-     * @param snappable_road_ids Vector of road edge indices that can be snapped to
+     * @param snappable_ids Vector of snappable (edge or point) IDs that can be snapped to
      * @return ConvexPathResult containing the optimal path found
      */
     ConvexPathResult sectionalSearch(const Point& p1, const Point& p2,
                                    const ConvexPathResult& p1_path,
                                    const ConvexPathResult& p2_path,
                                    double max_distance,
-                                   const std::vector<size_t>& snappable_road_ids);
+                                   const std::vector<size_t>& snappable_ids);
 
     /**
      * Get the results from polygon processing
@@ -232,6 +243,13 @@ public:
      * @return Current graph vertex snapping tolerance
      */
     double getGraphVertexSnappingTolerance() const { return graph_vertex_snapping_tolerance_; }
+    
+    /**
+     * Get access point by index (used in processConvexPathModeNoRoad)
+     * @param index Index of the access point
+     * @return Optional PointFeature if index is valid, nullopt otherwise
+     */
+    std::optional<PointFeature> getAccessPoint(size_t index) const;
 
 private:
     /**
@@ -256,6 +274,9 @@ private:
     
     // Flag to track if building dataset has been initialized
     bool building_dataset_initialized_;
+    
+    // Flag to indicate whether road data is being used (true for processConvexPathMode, false for processConvexPathModeNoRoad)
+    bool useRoadData_;
     
     // Flag to include network distance information in output
     bool include_network_distance_;
@@ -285,6 +306,9 @@ private:
     
     // Results from polygon processing
     std::vector<std::tuple<std::vector<ConvexPathResult>, size_t, Point>> polygon_results_;
+    
+    // Access points (only used in processConvexPathModeNoRoad, not in processConvexPathMode)
+    std::vector<PointFeature> access_points_;
 };
 
 } // namespace graph

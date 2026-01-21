@@ -6,9 +6,12 @@
 #include <algorithm>
 #include <gdal.h>
 #include <ogr_api.h>
+#include <boost/geometry/index/rtree.hpp>
 
 namespace adjfind {
 namespace io {
+
+namespace bgi = boost::geometry::index;
 
 PointReader::PointReader(const PointReaderConfig& config)
     : config_(config), dataset_(nullptr), coordinate_transformation_(nullptr) {
@@ -294,6 +297,20 @@ void PointReader::buildSpatialIndex() {
     std::cout << "Built spatial index for " << rtree_values.size() << " points" << std::endl;
 }
 
+std::vector<size_t> PointReader::findPointsIntersectBoundingBox(const graph::Box& box) const {
+    std::vector<size_t> point_indices;
+    if (rtree_.empty()) {
+        return point_indices;
+    }
+    std::vector<graph::PointRTreeValue> query_results;
+    rtree_.query(bgi::intersects(box), std::back_inserter(query_results));
+    point_indices.reserve(query_results.size());
+    for (const auto& v : query_results) {
+        point_indices.push_back(v.feature_index);
+    }
+    return point_indices;
+}
+
 const graph::PointFeature& PointReader::getPointFeature(size_t index) const {
     if (index >= points_.size()) {
         throw std::out_of_range("Point feature index out of range");
@@ -301,6 +318,13 @@ const graph::PointFeature& PointReader::getPointFeature(size_t index) const {
     return points_[index];
 }
 
+std::vector<graph::PointFeature> PointReader::movePoints() {
+    std::vector<graph::PointFeature> moved_points = std::move(points_);
+    points_.clear();
+    // Clear r-tree since points are moved out
+    rtree_.clear();
+    return moved_points;
+}
 
 
 std::optional<OGRSpatialReferenceH> PointReader::getSpatialRef() const {

@@ -203,6 +203,13 @@ public:
     int getCoordinateSystemEPSG() const { return coordinate_system_epsg_; }
 
     /**
+     * Set coordinate system (used when not set via readAndSnapPointToRoad, e.g. in processConvexPathModeNoRoad)
+     * @param wkt Coordinate system WKT string
+     * @param epsg EPSG code
+     */
+    void setCoordinateSystem(const std::string& wkt, int epsg);
+
+    /**
      * Compute the snapped point on an edge
      * @param snappable_road_edge_index Single road edge index to snap to
      * @param point The point to snap to the edge

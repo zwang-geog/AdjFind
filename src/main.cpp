@@ -76,10 +76,12 @@ void printUsage(const char* programName) {
               << "  --building-id-field <name>   Field name for building ID (defaults to OGR FID)\n"
               << "  --building-layer-index <index> Layer index to read from building file (default: 0)\n"
               << "  --is-obstacle-only-field <name> Field name for obstacle-only flag\n"
-              << "  --road-ids-snappable-field <name> Field name for comma-separated road IDs\n"
+              << "  --snappable-ids-field <name> Field name for comma-separated road IDs or point IDs (when road dataset not provided)\n"
+              << "  --candidate-access-points-search-distance <value> Buffer distance for candidate access points search when road dataset not provided (default: 1500)\n"
               << "  --min-polygon-boundary-segment-length-for-nearest-road-edge-detection <length> Minimum polygon boundary segment length for nearest road edge detection (default: 80.0)\n"
               << "  --include-network-distance    A flag argument that will include network distance in addition to access distance (structure-road) in the objective function of path finding algorithm (default: not included)\n"
               << "  --graph-vertex-snapping-tolerance <value> Distance tolerance for snapping graph vertices (default: 1e-6)\n"
+              << "  --output-road-access-point    A flag argument to output road access point file (last point of each path linestring) when road dataset is provided (default: false)\n"
               << "\nFor neighboring-points mode, additional optional arguments:\n"
               << "  --intersection-vertex-distance-threshold <value> Any point snapped to within this threshold from a road intersection will be subject to neighbor search from all outgoing directions from the intersection (default: 60.0)\n"
               << "  --cutoff <value>               If the path distance exceeds this cutoff and still no neighbor found along a given travel direction, the search along this direction will stop\n"
@@ -154,10 +156,12 @@ void printDetailedHelp(const char* programName) {
               << "     --building-id-field <name>  Field name for building ID (defaults to OGR FID)\n"
               << "     --building-layer-index <index> Layer index to read from building file (default: 0)\n"
               << "     --is-obstacle-only-field <name> Field name for obstacle-only flag\n"
-              << "     --road-ids-snappable-field <name> Field name for comma-separated road IDs\n"
+              << "     --snappable-ids-field <name> Field name for comma-separated road IDs or point IDs (when road dataset not provided)\n"
+              << "     --candidate-access-points-search-distance <value> Buffer distance for candidate access points search when road dataset not provided (default: 1500)\n"
               << "     --min-polygon-boundary-segment-length-for-nearest-road-edge-detection <length> Minimum polygon boundary segment length (default: 80.0)\n"
               << "     --include-network-distance    Include network distance in objective function\n"
               << "     --graph-vertex-snapping-tolerance <value> Distance tolerance for snapping graph vertices (default: 1e-6)\n"
+              << "     --output-road-access-point    Output road access point file (last point of each path linestring) when road dataset is provided (default: false)\n"
               << "     --reproject-to-epsg4326     Reproject output to EPSG:4326 (WGS84)\n\n"
               << "   Example:\n"
               << "     " << programName << " --road-file-path roads.gpkg --point-file-path points.gpkg --building-file-path buildings.gpkg --mode structure-access --output-file structure_results.geojson\n\n"
@@ -202,6 +206,31 @@ std::unordered_map<std::string, std::string> parseArgs(int argc, char* argv[]) {
     return args;
 }
 
+// Helper function to parse boolean flag values
+// Returns true if flag exists and value is "true" (case-insensitive), false otherwise
+bool parseBooleanFlag(const std::unordered_map<std::string, std::string>& args, const std::string& flag_name, bool default_value = false) {
+    if (args.count(flag_name) == 0) {
+        return default_value;
+    }
+    
+    std::string value = args.at(flag_name);
+    // Convert to lowercase for case-insensitive comparison
+    std::transform(value.begin(), value.end(), value.begin(), ::tolower);
+    
+    // Check for true values
+    if (value == "true" || value == "1" || value == "yes" || value == "on") {
+        return true;
+    }
+    
+    // Check for false values
+    if (value == "false" || value == "0" || value == "no" || value == "off" || value.empty()) {
+        return false;
+    }
+    
+    // If value is provided but not recognized, default to true (for backward compatibility with flag-only usage)
+    return true;
+}
+
 void processRoadSegmentationMode(const std::unordered_map<std::string, std::string>& args) {
     // Parse required arguments
     std::string road_file_path = args.at("road-file-path");
@@ -242,7 +271,7 @@ void processRoadSegmentationMode(const std::unordered_map<std::string, std::stri
     
     // Parse output arguments
     std::string output_file = args.count("output-file") ? args.at("output-file") : "output.geojson";
-    bool reproject_to_epsg4326 = args.count("reproject-to-epsg4326") > 0;
+    bool reproject_to_epsg4326 = parseBooleanFlag(args, "reproject-to-epsg4326", false);
     
     // Parse distance breakpoints (optional)
     std::vector<double> distance_breakpoints;
@@ -290,7 +319,8 @@ void processRoadSegmentationMode(const std::unordered_map<std::string, std::stri
 
 void processStructureAccessMode(const std::unordered_map<std::string, std::string>& args) {
     // Parse required arguments
-    std::string road_file_path = args.at("road-file-path");
+    bool has_road_file = args.count("road-file-path") > 0;
+    std::string road_file_path = has_road_file ? args.at("road-file-path") : "";
     std::string point_file_path = args.at("point-file-path");
     std::string building_file_path = args.at("building-file-path");
     
@@ -332,7 +362,23 @@ void processStructureAccessMode(const std::unordered_map<std::string, std::strin
     }
     
     std::string is_obstacle_only_field = args.count("is-obstacle-only-field") ? args.at("is-obstacle-only-field") : "";
-    std::string road_ids_snappable_field = args.count("road-ids-snappable-field") ? args.at("road-ids-snappable-field") : "";
+    // snappable_ids_field: prefer --snappable-ids-field; if not specified and road dataset is provided, use --road-ids-snappable-field for backward compatibility
+    std::string snappable_ids_field = args.count("snappable-ids-field") ? args.at("snappable-ids-field") : (args.count("road-ids-snappable-field") ? args.at("road-ids-snappable-field") : "");
+    
+    // Parse candidate-access-points-search-distance (used only when road dataset is not provided; default 1500)
+    double candidate_access_points_search_distance = 1500.0;
+    if (args.count("candidate-access-points-search-distance") > 0) {
+        try {
+            candidate_access_points_search_distance = std::stod(args.at("candidate-access-points-search-distance"));
+            if (candidate_access_points_search_distance <= 0) {
+                std::cerr << "Error: candidate-access-points-search-distance must be positive" << std::endl;
+                return;
+            }
+        } catch (const std::exception& e) {
+            std::cerr << "Error: Invalid candidate-access-points-search-distance: " << e.what() << std::endl;
+            return;
+        }
+    }
     
     // Parse min polygon boundary segment length for nearest road edge detection
     double min_polygon_boundary_segment_length = 80.0; // Default value
@@ -351,10 +397,13 @@ void processStructureAccessMode(const std::unordered_map<std::string, std::strin
     
     // Parse output arguments
     std::string output_file = args.count("output-file") ? args.at("output-file") : "output.geojson";
-    bool reproject_to_epsg4326 = args.count("reproject-to-epsg4326") > 0;
+    bool reproject_to_epsg4326 = parseBooleanFlag(args, "reproject-to-epsg4326", false);
     
     // Parse include-network-distance flag
-    bool include_network_distance = args.count("include-network-distance") > 0;
+    bool include_network_distance = parseBooleanFlag(args, "include-network-distance", false);
+    
+    // Parse output-road-access-point flag
+    bool output_road_access_point = parseBooleanFlag(args, "output-road-access-point", false);
     
     // Parse graph-vertex-snapping-tolerance
     double graph_vertex_snapping_tolerance = 1e-6; // Default value
@@ -371,17 +420,6 @@ void processStructureAccessMode(const std::unordered_map<std::string, std::strin
         }
     }
     
-    // Create configurations
-    io::RoadReaderConfig road_config;
-    road_config.file_path = road_file_path;
-    road_config.id_field = road_id_field;
-    road_config.from_z_field = road_from_z_field;
-    road_config.to_z_field = road_to_z_field;
-    road_config.length_field = road_length_field;
-    road_config.default_from_z = 0.0;  // Always default to 0.0
-    road_config.default_to_z = 0.0;    // Always default to 0.0
-    road_config.layer_index = road_layer_index;
-    
     io::PointReaderConfig point_config;
     point_config.file_path = point_file_path;
     point_config.id_field = point_id_field;
@@ -391,7 +429,8 @@ void processStructureAccessMode(const std::unordered_map<std::string, std::strin
     building_config.file_path = building_file_path;
     building_config.id_field = building_id_field;
     building_config.is_obstacle_only_field = is_obstacle_only_field;
-    building_config.road_ids_snappable_field = road_ids_snappable_field;
+    building_config.snappable_ids_field = snappable_ids_field;
+    building_config.candidate_access_points_search_distance = candidate_access_points_search_distance;
     building_config.layer_index = building_layer_index;
     building_config.min_polygon_boundary_segment_length_for_nearest_road_edge_detection = min_polygon_boundary_segment_length;
     
@@ -406,7 +445,26 @@ void processStructureAccessMode(const std::unordered_map<std::string, std::strin
     convex_path.setGraphVertexSnappingTolerance(graph_vertex_snapping_tolerance);
     std::cout << "Graph vertex snapping tolerance set to: " << graph_vertex_snapping_tolerance << std::endl;
     
-    if (!convex_path.processConvexPathMode(road_config, point_config, building_config)) {
+    bool success = false;
+    if (has_road_file) {
+        // Create road configuration
+        io::RoadReaderConfig road_config;
+        road_config.file_path = road_file_path;
+        road_config.id_field = road_id_field;
+        road_config.from_z_field = road_from_z_field;
+        road_config.to_z_field = road_to_z_field;
+        road_config.length_field = road_length_field;
+        road_config.default_from_z = 0.0;  // Always default to 0.0
+        road_config.default_to_z = 0.0;    // Always default to 0.0
+        road_config.layer_index = road_layer_index;
+        
+        success = convex_path.processConvexPathMode(road_config, point_config, building_config);
+    } else {
+        // No road file provided, use processConvexPathModeNoRoad
+        success = convex_path.processConvexPathModeNoRoad(point_config, building_config);
+    }
+    
+    if (!success) {
         std::cerr << "Error processing structure access mode" << std::endl;
         return;
     }
@@ -417,6 +475,8 @@ void processStructureAccessMode(const std::unordered_map<std::string, std::strin
     writer_config.output_file_path = output_file;
     writer_config.crs_wkt = convex_path.getCoordinateSystemWKT();
     writer_config.reproject_to_epsg4326 = reproject_to_epsg4326;
+    writer_config.use_road_data = has_road_file;
+    writer_config.output_road_access_point = output_road_access_point;
     
     const auto& polygon_results = convex_path.getPolygonResults();
     
@@ -469,7 +529,7 @@ void processNeighboringPointsMode(const std::unordered_map<std::string, std::str
     
     // Parse output arguments
     std::string output_file = args.count("output-file") ? args.at("output-file") : "output.geojson";
-    bool reproject_to_epsg4326 = args.count("reproject-to-epsg4326") > 0;
+    bool reproject_to_epsg4326 = parseBooleanFlag(args, "reproject-to-epsg4326", false);
     
     // Parse neighboring points specific arguments
     double intersection_vertex_distance_threshold = 60.0; // Default value
@@ -559,20 +619,14 @@ int main(int argc, char* argv[]) {
         
         // Check for version flag
         if (args.count("version") > 0 || args.count("v") > 0) {
-            std::cout << "AdjFind v0.1.3\n";
+            std::cout << "AdjFind v0.2.0\n";
             std::cout << "Adjacency/Proximity Path Finding Tool\n";
-            std::cout << "Copyright (c) 2025 Zifan Wang\n";
+            std::cout << "Copyright (c) 2026 Zifan Wang\n";
             std::cout << "MIT License\n";
             return 0;
         }
         
         // Check for required arguments
-        if (args.count("road-file-path") == 0) {
-            std::cerr << "Error: --road-file-path is required" << std::endl;
-            printUsage(argv[0]);
-            return 1;
-        }
-        
         if (args.count("point-file-path") == 0) {
             std::cerr << "Error: --point-file-path is required" << std::endl;
             printUsage(argv[0]);
@@ -592,6 +646,13 @@ int main(int argc, char* argv[]) {
         }
         
         std::string mode = args.at("mode");
+        
+        // Check for road-file-path (required for all modes except structure-access)
+        if (mode != "structure-access" && args.count("road-file-path") == 0) {
+            std::cerr << "Error: --road-file-path is required for mode '" << mode << "'" << std::endl;
+            printUsage(argv[0]);
+            return 1;
+        }
         
         if (mode == "structure-access" && args.count("building-file-path") == 0) {
             std::cerr << "Error: --building-file-path is required for structure-access mode" << std::endl;

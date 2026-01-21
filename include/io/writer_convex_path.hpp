@@ -18,8 +18,10 @@ struct ConvexPathWriterConfig {
     std::string output_file_path;     // Output file path with extension
     std::string crs_wkt;              // Coordinate reference system WKT (optional)
     bool reproject_to_epsg4326;       // Whether to reproject output to EPSG:4326
+    bool use_road_data;               // Whether road data was used (affects which fields are created)
+    bool output_road_access_point;    // Whether to output road access point file (only when use_road_data is true)
     
-    ConvexPathWriterConfig() : reproject_to_epsg4326(false) {}
+    ConvexPathWriterConfig() : reproject_to_epsg4326(false), use_road_data(true), output_road_access_point(false) {}
 };
 
 /**
@@ -78,6 +80,15 @@ private:
     GDALDatasetH createPointDataset(const ConvexPathWriterConfig& config, OGRCoordinateTransformationH& coord_trans, std::string& output_file_path);
     
     /**
+     * Create GDAL dataset for writing road access point features
+     * @param config Writer configuration
+     * @param coord_trans Output parameter for coordinate transformation (can be nullptr)
+     * @param output_file_path Output parameter for the actual file path used (can be modified for format fallback)
+     * @return GDAL dataset handle (caller owns the handle)
+     */
+    GDALDatasetH createRoadAccessPointDataset(const ConvexPathWriterConfig& config, OGRCoordinateTransformationH& coord_trans, std::string& output_file_path);
+    
+    /**
      * Write a single linestring feature
      * @param dataset GDAL dataset
      * @param layer GDAL layer
@@ -112,6 +123,22 @@ private:
                           size_t polygon_feature_id,
                           const graph::Point& least_accessible_point,
                           size_t feature_id);
+    
+    /**
+     * Write road access point features (last point of each path linestring)
+     * @param dataset GDAL dataset
+     * @param layer GDAL layer
+     * @param coord_trans Coordinate transformation (can be nullptr)
+     * @param vertex_paths Vector of convex path results
+     * @param polygon_feature_id Polygon feature ID
+     * @param feature_id Feature ID counter (will be incremented for each feature written)
+     * @return true if successful, false otherwise
+     */
+    bool writeRoadAccessPointFeatures(GDALDatasetH dataset, OGRLayerH layer,
+                                     OGRCoordinateTransformationH coord_trans,
+                                     const std::vector<graph::ConvexPathResult>& vertex_paths,
+                                     size_t polygon_feature_id,
+                                     size_t& feature_id);
     
     /**
      * Convert ConvexPathResultType enum to string
