@@ -10,7 +10,7 @@ This repository contains the source code for the AdjFind project, a C++ applicat
 
 ## Quick Installation (macOS)
 
-The easiest way to install AdjFind on macOS is using Homebrew:
+The easiest way to install AdjFind on macOS is using [Homebrew](https://brew.sh/):
 
 ```bash
 # Add the repository as a tap
@@ -20,9 +20,20 @@ brew tap zwang-geog/AdjFind https://github.com/zwang-geog/AdjFind.git
 brew install zwang-geog/adjfind/adjfind
 ```
 
-Then run:
+Then run following to confirm installation:
 ```bash
 adjfind --help
+```
+
+## Installation via [conda](https://docs.conda.io/projects/conda/en/stable/user-guide/install/index.html) using conda-forge channel
+
+```bash
+conda install -c conda-forge adjfind
+```
+
+Alternatively, you can use the channel::package syntax (requires conda 4.6+):
+```bash
+conda install conda-forge::adjfind
 ```
 
 ## Supported Algorithms/Modes
