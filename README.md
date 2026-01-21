@@ -33,11 +33,11 @@ Given a point dataset such as hydrant locations and a road network linestring da
 
 With mode parameter set to road-segmentation and without specifying distance-breakpoints parameter, the output effect of service areas is illustrated with the following figure: the portions of the network colored in red are closest to point 1 while the portions of the network colored in blue are closest to point 2. 
 
-![Road segmentation mode without distance-breakpoints parameter](assets/road_segmentation_illustration_1.png)
+![Road segmentation mode without distance-breakpoints parameter](assets/road_segmentation_illustration_1_resized.png)
 
 Alternatively, if distance-breakpoints parameter is specified, the road linestrings will be further split with the provided breakpoints, and each linestring in the output will be assigned with a **discrete distance bracket or category**. The output effect of distance categories (using distance-breakpoints 100,200,300) is illustrated with the following figure: the portion of the network within 100 units from a point is colored in green (distance_category 0-100), the portion of the network with distance_category 100-200 is colored in yellow, the portion of the network with distance_category 200-300 is colored in red, and the portion of the network with distance_category >=300 is colored in purple.
 
-![Road segmentation mode with distance-breakpoints parameter](assets/road_segmentation_illustration_2.png)
+![Road segmentation mode with distance-breakpoints parameter](assets/road_segmentation_illustration_2_resized.png)
 
 The output layer consists of following fields:
 - `id` - unique identifier of each row
