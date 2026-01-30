@@ -421,11 +421,11 @@ bool ConvexPathWriter::writeLinestringFeature(GDALDatasetH dataset, OGRLayerH la
             return false;
         }
         
-        // Set geometry - create empty linestring if path not found
+        // Set geometry - create empty linestring if path not found (use AddPoint_2D for strict 2D; GDAL 3.12+ otherwise treats as Z)
         OGRGeometryH line_string = OGR_G_CreateGeometry(wkbLineString);
         if (path_result.path_found && !path_result.path_geometry.empty()) {
             for (const auto& point : path_result.path_geometry) {
-                OGR_G_AddPoint(line_string, point.get<0>(), point.get<1>(), 0.0);
+                OGR_G_AddPoint_2D(line_string, point.get<0>(), point.get<1>());
             }
             
             // Reproject geometry if transformation is provided
