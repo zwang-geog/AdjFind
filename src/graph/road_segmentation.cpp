@@ -356,20 +356,44 @@ std::vector<RoadSplitByDistanceBracketsOutput> RoadSegmentation::splitRoadLinest
             continue;
         }
         
-        // Loop through each element in the input vector
+        // Loop through each element in the input vector.
+        // Only include interpolation points that lie *inside* the edge (0, edge.weight).
+        // Including subtracted_value > edge.weight would interpolate beyond the edge;
+        // line_interpolate then returns the same end point for all such distances, producing zero-length segments.
         for (size_t i = 0; i < sorted_distances.size(); ++i) {
             double distance = sorted_distances[i];
             double subtracted_value = distance - distance_to_point_vertex;
-            if (subtracted_value >= 0 && subtracted_value <= edge.weight) {  // avoid small segments
+            if (subtracted_value > 0 && subtracted_value < edge.weight) {
                 distances_to_be_interpolated.push_back(std::make_pair(subtracted_value, i));
             }
         }
         
-        // If no distances to interpolate after filtering, it means the linestring in fact can be split into two parts with one part that is very close to 0 length
+        // If no breakpoints fall inside this edge, output the entire edge as one segment so the network stays connected.
         if (distances_to_be_interpolated.empty()) {
-            std::cout << "WARNING: No valid interpolation points found for edge " << edge.feature_id 
-                      << " (distance_to_point_vertex: " << distance_to_point_vertex 
-                      << ", edge_weight: " << edge.weight << ")" << std::endl;
+            std::string distance_category;
+            // Edge distance range is [distance_to_point_vertex, distance_to_point_vertex + edge.weight].
+            // Determine which bracket it falls into by checking against sorted_distances.
+            if (distance_to_point_vertex >= sorted_distances.back()) {
+                distance_category = ">=" + std::to_string(static_cast<int>(sorted_distances.back()));
+            } else if (distance_to_point_vertex + edge.weight <= sorted_distances.front()) {
+                distance_category = "0-" + std::to_string(static_cast<int>(sorted_distances.front()));
+            } else {
+                // Find the bracket [sorted_distances[i], sorted_distances[i+1]] that contains the edge range
+                for (size_t i = 0; i + 1 < sorted_distances.size(); ++i) {
+                    if (distance_to_point_vertex >= (sorted_distances[i] - 0.1) && distance_to_point_vertex + edge.weight <= (sorted_distances[i + 1] + 0.1)) {
+                        distance_category = std::to_string(static_cast<int>(sorted_distances[i])) + "-" + std::to_string(static_cast<int>(sorted_distances[i + 1]));
+                        break;
+                    }
+                }
+            }
+
+            if (distance_category.empty()) {
+                std::cout << "WARNING: Skipping edge " << edge.feature_id << " because no distance category found" << std::endl;
+                continue;
+            }
+
+            output.emplace_back(edge.geometry, edge.weight, distance_category, from_vertex.distance_to_point_vertex, to_vertex.distance_to_point_vertex,
+                              edge.feature_id, nearest_point_vertex.feature_id);
             continue;
         }
         

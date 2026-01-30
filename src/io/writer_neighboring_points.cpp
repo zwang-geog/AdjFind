@@ -395,7 +395,7 @@ bool NeighboringPointsWriter::writeLinestringAndPointFeatures(GDALDatasetH lines
         for (const auto& linestring : path_geometry) {
             OGRGeometryH ogr_linestring = OGR_G_CreateGeometry(wkbLineString);
             for (const auto& point : linestring) {
-                OGR_G_AddPoint(ogr_linestring, bg::get<0>(point), bg::get<1>(point), 0.0);
+                OGR_G_AddPoint_2D(ogr_linestring, bg::get<0>(point), bg::get<1>(point));
             }
             OGR_G_AddGeometry(ogr_geometry, ogr_linestring);
         }
