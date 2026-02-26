@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
-project(adjfind VERSION 0.2.0)
+project(adjfind VERSION 0.2.1)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -16,6 +16,7 @@ endif()
 # Find required packages
 find_package(Boost REQUIRED COMPONENTS filesystem)
 find_package(GDAL REQUIRED)
+find_package(HDF5 REQUIRED)
 
 # Include directories
 include_directories(include)
@@ -31,10 +32,12 @@ set(SOURCES
     src/io/writer_road_segmentation.cpp
     src/io/writer_convex_path.cpp
     src/io/writer_neighboring_points.cpp
+    src/io/writer_visibility.cpp
     src/graph/adj_graph.cpp
     src/graph/road_segmentation.cpp
     src/graph/convex_path.cpp
     src/graph/neighboring_points.cpp
+    src/graph/line_of_sight_visibility.cpp
 )
 
 # Header files
@@ -47,22 +50,26 @@ set(HEADERS
     include/io/writer_road_segmentation.hpp
     include/io/writer_convex_path.hpp
     include/io/writer_neighboring_points.hpp
+    include/io/writer_visibility.hpp
     include/graph/adj_graph.hpp
     include/graph/road_segmentation.hpp
     include/graph/common.hpp
     include/graph/convex_path.hpp
     include/graph/neighboring_points.hpp
+    include/graph/line_of_sight_visibility.hpp
 )
 
 # Create executable
 add_executable(adjfind ${SOURCES} ${HEADERS})
 
 # Link libraries using modern CMake targets
+target_include_directories(adjfind PRIVATE ${HDF5_INCLUDE_DIRS})
 target_link_libraries(adjfind
     PRIVATE
     GDAL::GDAL
     Boost::boost
     Boost::filesystem
+    ${HDF5_LIBRARIES}
 )
 
 # Enable packaging

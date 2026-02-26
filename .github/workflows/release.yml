@@ -15,7 +15,7 @@ jobs:
       - name: Install dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake build-essential libgdal-dev libboost-all-dev
+          sudo apt-get install -y cmake build-essential libgdal-dev libboost-all-dev libhdf5-dev
       
       - name: Build
         run: |
@@ -35,7 +35,7 @@ jobs:
       
       - name: Install dependencies
         run: |
-          brew install cmake gdal
+          brew install cmake gdal hdf5
           
       - name: Install Boost via conda
         run: |
@@ -62,58 +62,8 @@ jobs:
           name: adjfind-macos
           path: build/adjfind-*.tar.gz
 
-  build-windows:
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-      
-      - name: Add MSBuild to PATH
-        uses: microsoft/setup-msbuild@v1.1
-      
-      - name: Setup vcpkg
-        run: |
-          git clone https://github.com/Microsoft/vcpkg.git
-          .\vcpkg\bootstrap-vcpkg.bat
-          .\vcpkg\vcpkg integrate install
-      
-      - name: Cache vcpkg packages
-        uses: actions/cache@v3
-        with:
-          path: |
-            ${{ github.workspace }}/vcpkg/installed
-            ${{ github.workspace }}/vcpkg/packages
-          key: vcpkg-${{ runner.os }}-${{ hashFiles('**/vcpkg.json') }}
-          restore-keys: |
-            vcpkg-${{ runner.os }}-
-      
-      - name: Install dependencies
-        run: |
-          .\vcpkg\vcpkg install gdal:x64-windows boost:x64-windows --clean-after-build
-        
-      - name: Configure CMake
-        run: |
-          mkdir build
-          cd build
-          cmake .. -DCMAKE_TOOLCHAIN_FILE=${{ github.workspace }}/vcpkg/scripts/buildsystems/vcpkg.cmake -DCMAKE_BUILD_TYPE=Release -A x64
-        
-      - name: Build
-        run: |
-          cd build
-          cmake --build . --config Release
-        
-      - name: Create package
-        run: |
-          cd build
-          cpack -G ZIP -C Release
-        
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: adjfind-windows
-          path: build/adjfind-*.zip
-
   create-release:
-    needs: [build-linux, build-macos, build-windows]
+    needs: [build-linux, build-macos]
     runs-on: ubuntu-latest
     permissions:
       contents: write      # This is required for creating releases
@@ -128,7 +78,6 @@ jobs:
           files: |
             adjfind-linux/*
             adjfind-macos/*
-            adjfind-windows/*
           generate_release_notes: true    # Automatically generate release notes from commits
           draft: false                    # Create a published release
           prerelease: false              # Mark as full release, not pre-release

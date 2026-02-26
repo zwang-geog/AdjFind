@@ -11,8 +11,10 @@
 #include "io/writer_road_segmentation.hpp"
 #include "io/writer_convex_path.hpp"
 #include "io/writer_neighboring_points.hpp"
+#include "io/writer_visibility.hpp"
 #include "io/gdal_utils.hpp"
 #include "graph/adj_graph.hpp"
+#include "graph/line_of_sight_visibility.hpp"
 #include "graph/road_segmentation.hpp"
 #include "graph/convex_path.hpp"
 #include "graph/neighboring_points.hpp"
@@ -57,7 +59,7 @@ void printUsage(const char* programName) {
               << "\nRequired arguments:\n"
               << "  --road-file-path <path>      Path to the road network file\n"
               << "  --point-file-path <path>     Path to the point file\n"
-              << "  --mode <mode>                Operation mode: 'road-segmentation', 'structure-access', or 'neighboring-points'\n"
+              << "  --mode <mode>                Operation mode: 'road-segmentation', 'structure-access', 'neighboring-points', or 'line-of-sight-visibility'\n"
               << "  --output-file <path>         Output file path with extension (required for all modes)\n"
               << "\nOptional arguments:\n"
               << "  --road-id-field <name>       Field name for road ID (defaults to OGR FID)\n"
@@ -85,10 +87,17 @@ void printUsage(const char* programName) {
               << "\nFor neighboring-points mode, additional optional arguments:\n"
               << "  --intersection-vertex-distance-threshold <value> Any point snapped to within this threshold from a road intersection will be subject to neighbor search from all outgoing directions from the intersection (default: 60.0)\n"
               << "  --cutoff <value>               If the path distance exceeds this cutoff and still no neighbor found along a given travel direction, the search along this direction will stop\n"
+              << "\nFor line-of-sight-visibility mode, additional required arguments:\n"
+              << "  --dem-file-path <path>         Path to the DEM GeoTIFF file\n"
+              << "\nFor line-of-sight-visibility mode, additional optional arguments:\n"
+              << "  --road-sample-interval <value> Spacing between road samples in CRS units (default: 150)\n"
+              << "  --visibility-range <value>     Maximum distance for line-of-sight checks in CRS units (default: 63360, e.g. 12 miles in feet)\n"
+              << "  --min-road-length-to-include <value> Roads shorter than this are skipped (default: 20)\n"
               << "\nExamples:\n"
               << "  " << programName << " --road-file-path roads.gpkg --point-file-path points.gpkg --mode road-segmentation --output-file results.geojson --distance-breakpoints 100,200,300 --reproject-to-epsg4326\n"
               << "  " << programName << " --road-file-path roads.gpkg --point-file-path points.gpkg --building-file-path buildings.gpkg --mode structure-access --output-file structure_results.geojson\n"
               << "  " << programName << " --road-file-path roads.gpkg --point-file-path points.gpkg --mode neighboring-points --output-file neighboring_results.geojson --intersection-vertex-distance-threshold 50.0 --cutoff 200.0\n"
+              << "  " << programName << " --road-file-path roads.gpkg --point-file-path ignitions.gpkg --dem-file-path dem.tif --mode line-of-sight-visibility --output-file visibility_analysis.h5 --road-sample-interval 150 --visibility-range 63360\n"
               << "\nUse --help for detailed parameter explanations and examples.\n"
               << "Use --version to display version information.\n";
 }
@@ -137,7 +146,24 @@ void printDetailedHelp(const char* programName) {
               << "     --cutoff <value>            Distance cutoff for neighbor search\n\n"
               << "   Example:\n"
               << "     " << programName << " --road-file-path roads.gpkg --point-file-path points.gpkg --mode neighboring-points --output-file neighboring_results.geojson\n\n"
-              << "3. STRUCTURE ACCESS MODE (--mode structure-access)\n"
+              << "3. LINE-OF-SIGHT VISIBILITY MODE (--mode line-of-sight-visibility)\n"
+              << "   Determines which road locations can observe ignition points (e.g. wildfire ignitions) accounting for terrain obstruction (DEM).\n"
+              << "   Outputs HDF5 with road sample points, distance matrix, and sparse visibility pairs for optimization.\n\n"
+              << "   Required Arguments:\n"
+              << "     --road-file-path <path>     Path to the road network file\n"
+              << "     --point-file-path <path>    Path to ignition points file\n"
+              << "     --dem-file-path <path>      Path to DEM GeoTIFF\n"
+              << "     --output-file <path>        Output HDF5 file path (e.g. visibility_analysis.h5)\n\n"
+              << "   Optional Arguments:\n"
+              << "     --road-sample-interval <value> Spacing between road samples (default: 150)\n"
+              << "     --visibility-range <value>     Max distance for LOS checks (default: 63360)\n"
+              << "     --min-road-length-to-include <value> Roads shorter than this are skipped (default: 20)\n"
+              << "     --road-id-field, --point-id-field, --road-layer-index, --point-layer-index (as in other modes)\n\n"
+              << "   Coordinate system: Road, point, and DEM inputs should all use the same projected CRS (non-EPSG:4326, e.g. UTM)\n"
+              << "   so that interval, visibility range, and min road length are in meaningful linear units (meters or feet) and align with the DEM.\n\n"
+              << "   Example:\n"
+              << "     " << programName << " --road-file-path roads.gpkg --point-file-path ignitions.gpkg --dem-file-path dem.tif --mode line-of-sight-visibility --output-file visibility_analysis.h5\n\n"
+              << "4. STRUCTURE ACCESS MODE (--mode structure-access)\n"
               << "   Computes shortest unobstructed paths from building corners to road networks.\n"
               << "   Finds the least accessible points on buildings for emergency response planning.\n\n"
               << "   Required Arguments:\n"
@@ -602,6 +628,115 @@ void processNeighboringPointsMode(const std::unordered_map<std::string, std::str
     std::cout << "Snapped points written to: " << writer.generateSnappedPointsFilePath(output_file) << std::endl;
 }
 
+void processLineOfSightVisibilityMode(const std::unordered_map<std::string, std::string>& args) {
+    std::string road_file_path = args.at("road-file-path");
+    std::string point_file_path = args.at("point-file-path");
+    std::string dem_file_path = args.at("dem-file-path");
+    std::string output_file = args.count("output-file") ? args.at("output-file") : "visibility_analysis.h5";
+
+    std::string road_id_field = args.count("road-id-field") ? args.at("road-id-field") : "";
+    std::string road_from_z_field = args.count("road-from-z-field") ? args.at("road-from-z-field") : "";
+    std::string road_to_z_field = args.count("road-to-z-field") ? args.at("road-to-z-field") : "";
+    std::string road_length_field = args.count("road-length-field") ? args.at("road-length-field") : "";
+    int road_layer_index = 0;
+    if (args.count("road-layer-index") > 0) {
+        try {
+            road_layer_index = std::stoi(args.at("road-layer-index"));
+            if (road_layer_index < 0) throw std::invalid_argument("Road layer index must be non-negative");
+        } catch (const std::exception& e) {
+            std::cerr << "Error: Invalid road-layer-index: " << e.what() << std::endl;
+            return;
+        }
+    }
+    std::string point_id_field = args.count("point-id-field") ? args.at("point-id-field") : "";
+    int point_layer_index = 0;
+    if (args.count("point-layer-index") > 0) {
+        try {
+            point_layer_index = std::stoi(args.at("point-layer-index"));
+            if (point_layer_index < 0) throw std::invalid_argument("Point layer index must be non-negative");
+        } catch (const std::exception& e) {
+            std::cerr << "Error: Invalid point-layer-index: " << e.what() << std::endl;
+            return;
+        }
+    }
+
+    double road_sample_interval = 150.0;
+    if (args.count("road-sample-interval") > 0) {
+        try {
+            road_sample_interval = std::stod(args.at("road-sample-interval"));
+            if (road_sample_interval <= 0) {
+                std::cerr << "Error: road-sample-interval must be positive" << std::endl;
+                return;
+            }
+        } catch (const std::exception& e) {
+            std::cerr << "Error: Invalid road-sample-interval: " << e.what() << std::endl;
+            return;
+        }
+    }
+    double visibility_range = 63360.0;
+    if (args.count("visibility-range") > 0) {
+        try {
+            visibility_range = std::stod(args.at("visibility-range"));
+            if (visibility_range <= 0) {
+                std::cerr << "Error: visibility-range must be positive" << std::endl;
+                return;
+            }
+        } catch (const std::exception& e) {
+            std::cerr << "Error: Invalid visibility-range: " << e.what() << std::endl;
+            return;
+        }
+    }
+    double min_road_length_to_include = 20.0;
+    if (args.count("min-road-length-to-include") > 0) {
+        try {
+            min_road_length_to_include = std::stod(args.at("min-road-length-to-include"));
+            if (min_road_length_to_include < 0) {
+                std::cerr << "Error: min-road-length-to-include must be non-negative" << std::endl;
+                return;
+            }
+        } catch (const std::exception& e) {
+            std::cerr << "Error: Invalid min-road-length-to-include: " << e.what() << std::endl;
+            return;
+        }
+    }
+
+    io::RoadReaderConfig road_config;
+    road_config.file_path = road_file_path;
+    road_config.id_field = road_id_field;
+    road_config.from_z_field = road_from_z_field;
+    road_config.to_z_field = road_to_z_field;
+    road_config.length_field = road_length_field;
+    road_config.default_from_z = 0.0;
+    road_config.default_to_z = 0.0;
+    road_config.layer_index = road_layer_index;
+
+    io::PointReaderConfig point_config;
+    point_config.file_path = point_file_path;
+    point_config.id_field = point_id_field;
+    point_config.layer_index = point_layer_index;
+
+    std::vector<graph::Point> road_points;
+    std::vector<graph::Point> ignition_points;
+    std::vector<float> distance_matrix;
+    std::vector<uint8_t> visibility_matrix;
+
+    graph::LineOfSightVisibility los;
+    if (!los.run(road_config, point_config, dem_file_path, road_sample_interval, visibility_range,
+                 min_road_length_to_include, road_points, ignition_points, distance_matrix,
+                 visibility_matrix)) {
+        return;
+    }
+
+    io::VisibilityWriter writer;
+    if (!writer.write(output_file, los.getCoordinateSystemWKT(), road_points, ignition_points,
+                      distance_matrix, visibility_matrix)) {
+        std::cerr << "Error writing visibility output." << std::endl;
+        return;
+    }
+    std::cout << "\nLine-of-sight visibility analysis completed successfully" << std::endl;
+    std::cout << "Output written to: " << output_file << std::endl;
+}
+
 int main(int argc, char* argv[]) {
     if (argc < 2) {
         printUsage(argv[0]);
@@ -619,7 +754,7 @@ int main(int argc, char* argv[]) {
         
         // Check for version flag
         if (args.count("version") > 0 || args.count("v") > 0) {
-            std::cout << "AdjFind v0.2.0\n";
+            std::cout << "AdjFind v0.2.1\n";
             std::cout << "Adjacency/Proximity Path Finding Tool\n";
             std::cout << "Copyright (c) 2026 Zifan Wang\n";
             std::cout << "MIT License\n";
@@ -659,6 +794,11 @@ int main(int argc, char* argv[]) {
             printUsage(argv[0]);
             return 1;
         }
+        if (mode == "line-of-sight-visibility" && args.count("dem-file-path") == 0) {
+            std::cerr << "Error: --dem-file-path is required for line-of-sight-visibility mode" << std::endl;
+            printUsage(argv[0]);
+            return 1;
+        }
         
         if (mode == "road-segmentation") {
             processRoadSegmentationMode(args);
@@ -666,6 +806,8 @@ int main(int argc, char* argv[]) {
             processStructureAccessMode(args);
         } else if (mode == "neighboring-points") {
             processNeighboringPointsMode(args);
+        } else if (mode == "line-of-sight-visibility") {
+            processLineOfSightVisibilityMode(args);
         } else {
             std::cerr << "Error: Unknown mode '" << mode << "'" << std::endl;
             printUsage(argv[0]);
