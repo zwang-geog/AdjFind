@@ -8,7 +8,9 @@
 #include <sstream>
 #include <algorithm>
 #include <unordered_set>
+#include <queue>
 #include <boost/geometry.hpp>
+#include <boost/geometry/algorithms/union.hpp>
 #include <boost/geometry/index/rtree.hpp>
 #include <boost/geometry/strategies/buffer.hpp>
 #include <boost/geometry/geometries/box.hpp>
@@ -683,6 +685,80 @@ std::optional<graph::Polygon> PolygonReader::computeShrinkGeometry(const graph::
     }
     
     return std::nullopt;
+}
+
+std::vector<graph::Polygon> PolygonReader::unionAdjacentPolygons() const {
+    // Dissolve adjacent polygons by treating intersection as adjacency:
+    // 1) group input polygons into connected components (BFS over intersecting pairs)
+    // 2) geometrically union each component into one or more output polygons
+    std::vector<graph::Polygon> result;
+    std::vector<bool> processed(polygons_.size(), false);
+    
+    for (size_t i = 0; i < polygons_.size(); ++i) {
+        if (processed[i]) {
+            continue;
+        }
+        
+        // BFS state for the current connected component.
+        // candidates: all polygon indices discovered so far in this component.
+        // to_check: frontier queue driving the breadth-first expansion.
+        std::unordered_set<size_t> candidates;
+        std::queue<size_t> to_check;
+        
+        candidates.insert(i);
+        to_check.push(i);
+        
+        while (!to_check.empty()) {
+            size_t current = to_check.front();
+            to_check.pop();
+            
+            // Use the polygon envelope as a cheap spatial filter, then confirm with
+            // exact geometry intersection. Two-stage check avoids O(n^2) comparisons.
+            graph::Box current_box;
+            bg::envelope(polygons_[current].geometry, current_box);
+            
+            std::vector<graph::PolygonRTreeValue> neighbors;
+            rtree_.query(bgi::intersects(current_box), std::back_inserter(neighbors));
+            
+            for (const auto& neighbor : neighbors) {
+                size_t neighbor_idx = neighbor.polygon_index;
+                // Skip self, polygons already assigned to another component, and
+                // polygons already queued for this component.
+                if (neighbor_idx != current && !processed[neighbor_idx] &&
+                    candidates.find(neighbor_idx) == candidates.end()) {
+                    // Adjacency rule: polygons that share any area (including edge-touching
+                    // intersections) belong to the same dissolve group.
+                    if (bg::intersects(polygons_[current].geometry, polygons_[neighbor_idx].geometry)) {
+                        candidates.insert(neighbor_idx);
+                        to_check.push(neighbor_idx);
+                    }
+                }
+            }
+        }
+        
+        // Union all polygons in this connected component. Boost.Geometry union is
+        // applied incrementally because union_ accepts one multi_polygon + one polygon.
+        bg::model::multi_polygon<graph::Polygon> union_result;
+        union_result.push_back(polygons_[*candidates.begin()].geometry);
+        
+        for (auto it = std::next(candidates.begin()); it != candidates.end(); ++it) {
+            bg::model::multi_polygon<graph::Polygon> temp_result;
+            bg::union_(union_result, polygons_[*it].geometry, temp_result);
+            union_result = temp_result;
+        }
+        
+        // A single union operation can still return multiple polygons (e.g., if the
+        // merged geometry contains disjoint parts or holes split into separate rings).
+        for (const auto& poly : union_result) {
+            result.push_back(poly);
+        }
+        
+        for (size_t idx : candidates) {
+            processed[idx] = true;
+        }
+    }
+    
+    return result;
 }
 
 void PolygonReader::processSinglePolygon(OGRGeometryH geometry, size_t feature_id, bool is_obstacle_only, 

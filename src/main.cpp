@@ -12,6 +12,8 @@
 #include "io/writer_convex_path.hpp"
 #include "io/writer_neighboring_points.hpp"
 #include "io/writer_visibility.hpp"
+#include "io/writer_dissolve_polygons.hpp"
+#include "io/polygon_reader.hpp"
 #include "io/gdal_utils.hpp"
 #include "graph/adj_graph.hpp"
 #include "graph/line_of_sight_visibility.hpp"
@@ -59,7 +61,7 @@ void printUsage(const char* programName) {
               << "\nRequired arguments:\n"
               << "  --road-file-path <path>      Path to the road network file\n"
               << "  --point-file-path <path>     Path to the point file\n"
-              << "  --mode <mode>                Operation mode: 'road-segmentation', 'structure-access', 'neighboring-points', or 'line-of-sight-visibility'\n"
+              << "  --mode <mode>                Operation mode: 'road-segmentation', 'structure-access', 'neighboring-points', 'line-of-sight-visibility', or 'dissolve-adjacent-polygons'\n"
               << "  --output-file <path>         Output file path with extension (required for all modes)\n"
               << "\nOptional arguments:\n"
               << "  --road-id-field <name>       Field name for road ID (defaults to OGR FID)\n"
@@ -93,11 +95,16 @@ void printUsage(const char* programName) {
               << "  --road-sample-interval <value> Spacing between road samples in CRS units (default: 150)\n"
               << "  --visibility-range <value>     Maximum distance for line-of-sight checks in CRS units (default: 63360, e.g. 12 miles in feet)\n"
               << "  --min-road-length-to-include <value> Roads shorter than this are skipped (default: 20)\n"
+              << "\nFor dissolve-adjacent-polygons mode, additional required arguments:\n"
+              << "  --polygon-file-path <path>   Path to the polygon input file\n"
+              << "\nFor dissolve-adjacent-polygons mode, additional optional arguments:\n"
+              << "  --polygon-layer-index <index> Layer index to read from polygon file (default: 0)\n"
               << "\nExamples:\n"
               << "  " << programName << " --road-file-path roads.gpkg --point-file-path points.gpkg --mode road-segmentation --output-file results.geojson --distance-breakpoints 100,200,300 --reproject-to-epsg4326\n"
               << "  " << programName << " --road-file-path roads.gpkg --point-file-path points.gpkg --building-file-path buildings.gpkg --mode structure-access --output-file structure_results.geojson\n"
               << "  " << programName << " --road-file-path roads.gpkg --point-file-path points.gpkg --mode neighboring-points --output-file neighboring_results.geojson --intersection-vertex-distance-threshold 50.0 --cutoff 200.0\n"
               << "  " << programName << " --road-file-path roads.gpkg --point-file-path ignitions.gpkg --dem-file-path dem.tif --mode line-of-sight-visibility --output-file visibility_analysis.h5 --road-sample-interval 150 --visibility-range 63360\n"
+              << "  " << programName << " --mode dissolve-adjacent-polygons --polygon-file-path parcels.gpkg --output-file dissolved_parcels.geojson --reproject-to-epsg4326\n"
               << "\nUse --help for detailed parameter explanations and examples.\n"
               << "Use --version to display version information.\n";
 }
@@ -191,6 +198,17 @@ void printDetailedHelp(const char* programName) {
               << "     --reproject-to-epsg4326     Reproject output to EPSG:4326 (WGS84)\n\n"
               << "   Example:\n"
               << "     " << programName << " --road-file-path roads.gpkg --point-file-path points.gpkg --building-file-path buildings.gpkg --mode structure-access --output-file structure_results.geojson\n\n"
+              << "5. DISSOLVE ADJACENT POLYGONS MODE (--mode dissolve-adjacent-polygons)\n"
+              << "   Reads a polygon dataset and unions adjacent (intersecting) polygons into connected components.\n"
+              << "   Does not require road or point datasets.\n\n"
+              << "   Required Arguments:\n"
+              << "     --polygon-file-path <path>  Path to the polygon input file\n"
+              << "     --output-file <path>        Output file path with extension\n\n"
+              << "   Optional Arguments:\n"
+              << "     --polygon-layer-index <index> Layer index to read from polygon file (default: 0)\n"
+              << "     --reproject-to-epsg4326     Reproject output to EPSG:4326 (WGS84)\n\n"
+              << "   Example:\n"
+              << "     " << programName << " --mode dissolve-adjacent-polygons --polygon-file-path parcels.gpkg --output-file dissolved_parcels.geojson\n\n"
               << "INPUT DATASET RECOMMENDATIONS:\n\n"
               << "Coordinate System:\n"
               << "  - Use projected coordinate systems in meters or feet\n"
@@ -737,6 +755,61 @@ void processLineOfSightVisibilityMode(const std::unordered_map<std::string, std:
     std::cout << "Output written to: " << output_file << std::endl;
 }
 
+void processDissolveAdjacentPolygonsMode(const std::unordered_map<std::string, std::string>& args) {
+    std::string polygon_file_path = args.at("polygon-file-path");
+    std::string output_file = args.at("output-file");
+    bool reproject_to_epsg4326 = parseBooleanFlag(args, "reproject-to-epsg4326", false);
+    
+    int polygon_layer_index = 0;
+    if (args.count("polygon-layer-index") > 0) {
+        try {
+            polygon_layer_index = std::stoi(args.at("polygon-layer-index"));
+            if (polygon_layer_index < 0) {
+                std::cerr << "Error: polygon-layer-index must be non-negative" << std::endl;
+                return;
+            }
+        } catch (const std::exception& e) {
+            std::cerr << "Error: Invalid polygon-layer-index: " << e.what() << std::endl;
+            return;
+        }
+    }
+    
+    io::PolygonReaderConfig polygon_config;
+    polygon_config.file_path = polygon_file_path;
+    polygon_config.layer_index = polygon_layer_index;
+    
+    io::PolygonReader polygon_reader(polygon_config);
+    if (!polygon_reader.read()) {
+        std::cerr << "Error: Failed to read polygon file" << std::endl;
+        return;
+    }
+    
+    if (polygon_reader.getFeatureCount() == 0) {
+        std::cerr << "Error: No polygon features found in input file" << std::endl;
+        return;
+    }
+    
+    std::cout << "Dissolving adjacent polygons..." << std::endl;
+    std::vector<graph::Polygon> dissolved_polygons = polygon_reader.unionAdjacentPolygons();
+    
+    std::cout << "Input polygons: " << polygon_reader.getFeatureCount()
+              << ", dissolved polygons: " << dissolved_polygons.size() << std::endl;
+    
+    io::DissolvePolygonsWriter writer;
+    io::DissolvePolygonsWriterConfig writer_config;
+    writer_config.output_file_path = output_file;
+    writer_config.crs_wkt = polygon_reader.getCoordinateSystemWKT();
+    writer_config.reproject_to_epsg4326 = reproject_to_epsg4326;
+    
+    if (!writer.writeDissolvedPolygons(writer_config, dissolved_polygons)) {
+        std::cerr << "Error writing output file: " << writer.getLastError() << std::endl;
+        return;
+    }
+    
+    std::cout << "\nDissolve adjacent polygons completed successfully" << std::endl;
+    std::cout << "Output written to: " << output_file << std::endl;
+}
+
 int main(int argc, char* argv[]) {
     if (argc < 2) {
         printUsage(argv[0]);
@@ -761,19 +834,6 @@ int main(int argc, char* argv[]) {
             return 0;
         }
         
-        // Check for required arguments
-        if (args.count("point-file-path") == 0) {
-            std::cerr << "Error: --point-file-path is required" << std::endl;
-            printUsage(argv[0]);
-            return 1;
-        }
-        
-        if (args.count("output-file") == 0) {
-            std::cerr << "Error: --output-file is required" << std::endl;
-            printUsage(argv[0]);
-            return 1;
-        }
-        
         if (args.count("mode") == 0) {
             std::cerr << "Error: --mode is required" << std::endl;
             printUsage(argv[0]);
@@ -782,8 +842,20 @@ int main(int argc, char* argv[]) {
         
         std::string mode = args.at("mode");
         
-        // Check for road-file-path (required for all modes except structure-access)
-        if (mode != "structure-access" && args.count("road-file-path") == 0) {
+        if (args.count("output-file") == 0) {
+            std::cerr << "Error: --output-file is required" << std::endl;
+            printUsage(argv[0]);
+            return 1;
+        }
+        
+        if (mode != "dissolve-adjacent-polygons" && args.count("point-file-path") == 0) {
+            std::cerr << "Error: --point-file-path is required" << std::endl;
+            printUsage(argv[0]);
+            return 1;
+        }
+        
+        // Check for road-file-path (required for all modes except structure-access and dissolve-adjacent-polygons)
+        if (mode != "structure-access" && mode != "dissolve-adjacent-polygons" && args.count("road-file-path") == 0) {
             std::cerr << "Error: --road-file-path is required for mode '" << mode << "'" << std::endl;
             printUsage(argv[0]);
             return 1;
@@ -799,6 +871,11 @@ int main(int argc, char* argv[]) {
             printUsage(argv[0]);
             return 1;
         }
+        if (mode == "dissolve-adjacent-polygons" && args.count("polygon-file-path") == 0) {
+            std::cerr << "Error: --polygon-file-path is required for dissolve-adjacent-polygons mode" << std::endl;
+            printUsage(argv[0]);
+            return 1;
+        }
         
         if (mode == "road-segmentation") {
             processRoadSegmentationMode(args);
@@ -808,6 +885,8 @@ int main(int argc, char* argv[]) {
             processNeighboringPointsMode(args);
         } else if (mode == "line-of-sight-visibility") {
             processLineOfSightVisibilityMode(args);
+        } else if (mode == "dissolve-adjacent-polygons") {
+            processDissolveAdjacentPolygonsMode(args);
         } else {
             std::cerr << "Error: Unknown mode '" << mode << "'" << std::endl;
             printUsage(argv[0]);

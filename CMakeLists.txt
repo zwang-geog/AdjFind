@@ -33,6 +33,7 @@ set(SOURCES
     src/io/writer_convex_path.cpp
     src/io/writer_neighboring_points.cpp
     src/io/writer_visibility.cpp
+    src/io/writer_dissolve_polygons.cpp
     src/graph/adj_graph.cpp
     src/graph/road_segmentation.cpp
     src/graph/convex_path.cpp
@@ -51,6 +52,7 @@ set(HEADERS
     include/io/writer_convex_path.hpp
     include/io/writer_neighboring_points.hpp
     include/io/writer_visibility.hpp
+    include/io/writer_dissolve_polygons.hpp
     include/graph/adj_graph.hpp
     include/graph/road_segmentation.hpp
     include/graph/common.hpp
