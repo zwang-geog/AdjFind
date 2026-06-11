@@ -8,6 +8,7 @@ class Adjfind < Formula
   depends_on "cmake" => :build
   depends_on "boost"
   depends_on "gdal"
+  depends_on "hdf5"
 
   def install
     # Create build directory

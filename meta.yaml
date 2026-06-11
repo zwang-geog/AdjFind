@@ -1,38 +1,33 @@
-{% set name = "adjfind" %}
-{% set version = "0.1.2" %}
+{% set version = "0.2.1" %}
 
 package:
-  name: {{ name|lower }}
+  name: adjfind
   version: {{ version }}
 
 source:
   url: https://github.com/zwang-geog/AdjFind/archive/refs/tags/v{{ version }}.tar.gz
-  sha256: dad985fbb2b752e993bc1631af50eee90f409a1a83351894882652bcebbd5ca2
+  sha256: c38373b8c0246245e7d12f11715ec9cd2e9fb61f3c1495ad4f425f737a96e606
 
 build:
-  number: 0
+  number: 1
   script: |
-    mkdir build
-    cd build
-    cmake ${CMAKE_ARGS} ..  # [unix]
-    cmake %CMAKE_ARGS% ..  # [win]
-    cmake --build . --config Release
-    cmake --install .
+    cmake -B build -S . ${CMAKE_ARGS}  # [unix]
+    cmake -B build -S . %CMAKE_ARGS%  # [win]
+    cmake --build build --config Release -j ${CPU_COUNT}  # [unix]
+    cmake --build build --config Release -j %CPU_COUNT%  # [win]   
+    cmake --install build
 
 requirements:
   build:
     - cmake
     - make  # [unix]
-    - git
     - {{ compiler('cxx') }}
     - {{ compiler('c') }}
     - {{ stdlib('c') }}
   host:
     - libgdal-core
     - libboost-devel
-  run:
-    - libgdal-core
-    - libboost
+    - hdf5
 
 test:
   commands:
@@ -48,7 +43,7 @@ about:
     The command-line tool supports three main modes:
     • Road Segmentation Mode: Determines which service points (e.g., hydrants) are closest to each road segment using network distance, and optionally splits roads into discrete distance categories for service area analysis.
     • Neighboring Points Mode: Identifies the nearest neighboring service points along a road network in each direction, calculating spacing distances between facilities like hydrants for regulatory compliance assessment.
-    • Structure Access Mode: Computes shortest unobstructed paths from building corners to road networks, finding the least accessible points on buildings for emergency response planning and fire code compliance.
+    • Structure Access Mode: Computes shortest unobstructed paths between building corners and road networks (e.g., assume fire engines can park anywhere along the provided road network) if road network is provided, or between building corners and access points (e.g., specific locations where fire engines can park) if road network is not provided. Moreover, it finds the least accessible points (a.k.a. furthest points) on buildings for emergency response planning and fire code compliance.
   doc_url: https://github.com/zwang-geog/AdjFind/blob/master/README.md
   dev_url: https://github.com/zwang-geog/AdjFind
 

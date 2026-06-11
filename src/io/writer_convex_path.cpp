@@ -523,7 +523,7 @@ bool ConvexPathWriter::writePointFeature(GDALDatasetH dataset, OGRLayerH layer,
     
     // Set geometry
     OGRGeometryH point_geom = OGR_G_CreateGeometry(wkbPoint);
-    OGR_G_SetPoint(point_geom, 0, least_accessible_point.get<0>(), least_accessible_point.get<1>(), 0.0);
+    OGR_G_SetPoint_2D(point_geom, 0, least_accessible_point.get<0>(), least_accessible_point.get<1>());
     
     // Reproject geometry if transformation is provided
     if (coord_trans) {
@@ -605,7 +605,7 @@ bool ConvexPathWriter::writeRoadAccessPointFeatures(GDALDatasetH dataset, OGRLay
         
         // Create point geometry
         OGRGeometryH point_geom = OGR_G_CreateGeometry(wkbPoint);
-        OGR_G_SetPoint(point_geom, 0, last_point.get<0>(), last_point.get<1>(), 0.0);
+        OGR_G_SetPoint_2D(point_geom, 0, last_point.get<0>(), last_point.get<1>());
         
         // Reproject geometry if transformation is provided
         if (coord_trans) {

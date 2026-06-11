@@ -121,6 +121,17 @@ public:
      * Clear all polygon data to free memory
      */
     void clearPolygons();
+    
+    /**
+     * Dissolve adjacent polygons by grouping intersecting input polygons into
+     * connected components, then unioning each component.
+     *
+     * Adjacency is defined by geometry intersection (including edge-touching).
+     * Uses BFS over an R-tree spatial index to find components efficiently.
+     *
+     * @return Vector of dissolved polygon geometries (one or more per component)
+     */
+    std::vector<graph::Polygon> unionAdjacentPolygons() const;
 
 private:
     PolygonReaderConfig config_;

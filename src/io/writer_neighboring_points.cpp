@@ -459,7 +459,7 @@ bool NeighboringPointsWriter::writeLinestringAndPointFeatures(GDALDatasetH lines
         
         // Set geometry (point)
         OGRGeometryH ogr_point = OGR_G_CreateGeometry(wkbPoint);
-        OGR_G_SetPoint(ogr_point, 0, bg::get<0>(point_geometry), bg::get<1>(point_geometry), 0.0);
+        OGR_G_SetPoint_2D(ogr_point, 0, bg::get<0>(point_geometry), bg::get<1>(point_geometry));
         
         // Apply coordinate transformation if needed
         if (coord_trans_point) {
