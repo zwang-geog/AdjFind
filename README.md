@@ -8,6 +8,10 @@ This repository contains the source code for the AdjFind project, a C++ applicat
 
 • **Structure Access Mode**: Computes shortest unobstructed paths between building corners and road networks (e.g., assume fire engines can park anywhere along the provided road network) if road network is provided, or between building corners and access points (e.g., specific locations where fire engines can park) if road network is not provided. Moreover, it finds the least accessible points (a.k.a. furthest points) on buildings for emergency response planning and fire code compliance.
 
+• **Line-of-Sight Visibility Mode**: Determines which locations on a road network can observe point features (e.g., historical wildfire ignition locations), accounting for terrain obstruction from a digital elevation model (DEM). Outputs dense distance and visibility matrices in HDF5 for downstream optimization (e.g., optimal placement of fire detection resources).
+
+• **Dissolve Adjacent Polygons Mode**: Reads a polygon dataset and unions geometrically adjacent (intersecting) polygons into connected components. Does not require road or point datasets.
+
 ## Quick Installation (macOS)
 
 The easiest way to install AdjFind on macOS is using [Homebrew](https://brew.sh/):
@@ -139,6 +143,8 @@ One example application of this mode will be assessing conformity of hydrant spa
 
 In applications such as firefighting of structure fires, we might be interested in knowning the minimum distance from any point on the building exterior to road network where fire engine can access and park. Simply doing a snapping of building corner point to its Euclidean distance (straight-line) closest road linestring has two limitations: (1) the straight-line path may cross obstacles, such as other buildings, or even the building itself if the corner point is at the back of the building, so it might underestimate the access distance to the identified road linestring, (2) due to the presence of obstacles, the road linestring identified by Euclidean distance might not always lead to true shortest unobstructed path, and another road linestring might actually have a shorter unobstructed path.
 
+If the building dataset contains adjacent or overlapping footprint polygons (e.g., multiple parts for one structure), it is recommended to dissolve them first using `--mode dissolve-adjacent-polygons` (see section 5 below) before running structure-access.
+
 Instead of doing simple Euclidean distance snapping of building corners to road network, this C++ program adopts a similar strategy as the [convex-path with spatial filtering algorithm](https://onlinelibrary.wiley.com/doi/10.1111/gean.12086) to compute shortest unobstructed paths (academic literature often refers this kind of problem as Euclidean shortest path problem). It should also be pointed out that traditional Euclidean shortes path problem assumes one origin point and one destination point, but this application tries to solve a one origin (e.g., building corner) to many destinations (infinite number of points that constitute the nearby snappable road linestrings); this C++ program also adopts a similar strategy as [Baik and Murray (2025)](https://www.sciencedirect.com/science/article/abs/pii/S0198971525000614).
 
 Under default settings when road dataset is provided, **for each building (from the building dataset) and each building corner point (i.e., a polygon feature's outer ring vertices), a shortest unobstructed path to road network is computed**. The path distance is reported in the **access_distance** field of the output dataset. The end of the path geometry will be a point on the road linestring (access point). With this point and the corresponding road linestring identified, we are able to compute the network distance between this point and the nearest hydrant (thanks the method developed in road-segmentation mode); **the sum of this network distance and the access_distance is reported in the distance_to_assigned_point field** of the output dataset.
@@ -196,6 +202,72 @@ The second output dataset is a point dataset with "_least_accessible_point" appe
 ./adjfind --road-file-path roads.gpkg --point-file-path points.gpkg --building-file-path buildings.gpkg --mode structure-access --output-file structure_results.geojson
 ```
 
+### 4. Line-of-sight visibility from road network to point features (`--mode line-of-sight-visibility`)
+
+Given a road network, a set of point features (e.g., historical wildland fire ignition locations), and a digital elevation model (DEM), we might be interested in knowing **which road locations can observe which points**, accounting for terrain obstruction along the sight line. This mode is designed as a faster alternative to computing full viewshed rasters for every point: instead, it samples the road network at discrete intervals and performs pairwise line-of-sight (LOS) checks between each road sample and each point.
+
+The algorithm proceeds in four steps:
+
+1. **Road network sampling** — Each road linestring is interpolated at a fixed interval (`road-sample-interval`). For short segments (length ≤ interval × 1.5), the midpoint is used instead. Roads shorter than `min-road-length-to-include` are skipped.
+2. **Distance matrix** — Euclidean distance is computed between every road sample point and every point feature, producing a dense N × M matrix (N = road samples, M = points).
+3. **Line-of-sight visibility** — For each (road sample, point) pair within `visibility-range`, a LOS check is performed using the DEM. Bresenham's line algorithm identifies every DEM cell the sight line passes through; for each inner cell along the path, the expected elevation on the straight 3D sight line is compared to the actual terrain elevation. If any terrain elevation exceeds the sight-line elevation, the pair is marked as not visible.
+4. **Output** — Results are written to a single HDF5 file with the following datasets at file root:
+
+| Dataset | Shape | Type | Description |
+|---------|-------|------|-------------|
+| `coords` | N × 2 | float64 | Road sample point coordinates (lon/lat in EPSG:4326 if source CRS is set; otherwise raw x, y) |
+| `distances` | N × M | float32 | Euclidean distance from each road sample to each point |
+| `visibility_matrix` | N × M | uint8 | 1 = visible (unobstructed LOS within range), 0 = not visible |
+
+The dense matrices enable downstream analysis such as non-dominant search optimization: for each distinct visibility count, identify road location(s) that minimize total distance to all visible points — useful for optimal placement of fire detection resources (cameras, observers, etc.).
+
+**Coordinate system note:** Road network, point, and DEM inputs should all use the same projected coordinate system (non-EPSG:4326, e.g., UTM or a state plane in feet) so that `road-sample-interval`, `visibility-range`, and `min-road-length-to-include` are in meaningful linear units and align with the DEM georeferencing.
+
+**Required Arguments:**
+- `--road-file-path <path>` - Path to the road network file
+- `--point-file-path <path>` - Path to the point file (e.g., ignition locations)
+- `--dem-file-path <path>` - Path to the DEM GeoTIFF file
+- `--output-file <path>` - Output HDF5 file path (e.g., `visibility_analysis.h5`)
+
+**Optional Arguments:**
+- `--road-id-field <name>` - Field name for road ID (defaults to OGR FID)
+- `--road-from-z-field <name>` - Field name for from z-level
+- `--road-to-z-field <name>` - Field name for to z-level
+- `--road-length-field <name>` - Field name for length (computed if not specified)
+- `--road-layer-index <index>` - Layer index to read from road file; typically this parameter should not be set unless the input dataset is a geopackage with multiple layers (default: 0)
+- `--point-id-field <name>` - Field name for point ID (defaults to OGR FID)
+- `--point-layer-index <index>` - Layer index to read from point file; typically this parameter should not be set unless the input dataset is a geopackage with multiple layers (default: 0)
+- `--road-sample-interval <value>` - Spacing between road samples in CRS units (default: 150)
+- `--visibility-range <value>` - Maximum distance for line-of-sight checks in CRS units (default: 63360, e.g., 12 miles in feet)
+- `--min-road-length-to-include <value>` - Roads shorter than this are skipped (default: 20)
+
+**Example:**
+```bash
+./adjfind --road-file-path roads.gpkg --point-file-path ignitions.gpkg --dem-file-path dem.tif --mode line-of-sight-visibility --output-file visibility_analysis.h5 --road-sample-interval 150 --visibility-range 63360
+```
+
+### 5. Dissolve adjacent polygons (`--mode dissolve-adjacent-polygons`)
+
+Given a polygon dataset where features may be spatially adjacent (sharing edges or overlapping), we might be interested in **grouping and merging adjacent polygons into connected components**. For example, a parcel dataset where adjacent parcels should be treated as a single unit, or a land-cover layer where contiguous polygons of the same class need to be dissolved.
+
+**It is recommended to run this mode on building datasets before using structure-access mode.** Adjacent or overlapping building polygons (e.g., multiple footprint parts for one structure) should be dissolved into a single polygon per connected component so that structure-access computes paths and least-accessible points per building rather than per fragment.
+This mode does not require road or point datasets. It reads the input polygon file, identifies connected components using breadth-first search over pairs of intersecting polygons (including edge-touching intersections), and geometrically unions each component. A single connected component may produce one or more output polygons if the union result contains disjoint parts.
+
+The output is a polygon dataset with the following field:
+- `id` - unique identifier of each dissolved polygon
+
+**Required Arguments:**
+- `--polygon-file-path <path>` - Path to the polygon input file
+- `--output-file <path>` - Output file path with extension
+
+**Optional Arguments:**
+- `--polygon-layer-index <index>` - Layer index to read from polygon file; typically this parameter should not be set unless the input dataset is a geopackage with multiple layers (default: 0)
+- `--reproject-to-epsg4326` - A flag variable that will reproject output to EPSG:4326 (WGS84)
+
+**Example:**
+```bash
+./adjfind --mode dissolve-adjacent-polygons --polygon-file-path parcels.gpkg --output-file dissolved_parcels.geojson --reproject-to-epsg4326
+```
 
 ## Input datasets recommendation
 

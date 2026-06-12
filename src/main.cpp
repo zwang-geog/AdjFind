@@ -1,3 +1,4 @@
+#include "adjfind_version.hpp"
 #include <iostream>
 #include <string>
 #include <unordered_map>
@@ -56,60 +57,7 @@ std::vector<double> parseDistanceVector(const std::string& distance_str) {
     return distances;
 }
 
-void printUsage(const char* programName) {
-    std::cout << "Usage: " << programName << " [--road-file-path <path>] --point-file-path <path> --mode <mode> [options]\n"
-              << "\nRequired arguments:\n"
-              << "  --road-file-path <path>      Path to the road network file (required for road-segmentation and neighboring-points; optional for structure-access)\n"
-              << "  --point-file-path <path>     Path to the point file\n"
-              << "  --mode <mode>                Operation mode: 'road-segmentation', 'structure-access', 'neighboring-points', 'line-of-sight-visibility', or 'dissolve-adjacent-polygons'\n"
-              << "  --output-file <path>         Output file path with extension (required for all modes)\n"
-              << "\nOptional arguments:\n"
-              << "  --road-id-field <name>       Field name for road ID (defaults to OGR FID)\n"
-              << "  --road-from-z-field <name>   Field name for from z-level\n"
-              << "  --road-to-z-field <name>     Field name for to z-level\n"
-              << "  --road-length-field <name>   Field name for length (computed if not specified)\n"
-              << "  --road-layer-index <index>   Layer index to read from road file; typically this parameter should not be set unless the input dataset is a geopackage with multiple layers (default: 0)\n"
-              << "  --point-id-field <name>      Field name for point ID (defaults to OGR FID)\n"
-              << "  --point-layer-index <index>  Layer index to read from point file; typically this parameter should not be set unless the input dataset is a geopackage with multiple layers (default: 0)\n"
-              << "  --reproject-to-epsg4326      A flag variable that will reproject output to EPSG:4326 (WGS84)\n"
-              << "\nFor road-segmentation mode, additional optional arguments:\n"
-              << "  --distance-breakpoints <values>   Comma-separated positive numbers for distance breakpoints that are used to split road linestrings to discrete distance categories (if not specified, the output delineates service area of each point feature on the network)\n"
-              << "\nFor structure-access mode, additional required arguments:\n"
-              << "  --building-file-path <path>  Path to the building dataset file\n"
-              << "\nFor structure-access mode, additional optional arguments:\n"
-              << "  --building-id-field <name>   Field name for building ID (defaults to OGR FID)\n"
-              << "  --building-layer-index <index> Layer index to read from building file (default: 0)\n"
-              << "  --is-obstacle-only-field <name> Field name for obstacle-only flag\n"
-              << "  --snappable-ids-field <name> Field in building dataset for comma-separated road IDs (if road dataset used) or point IDs (if road dataset not provided). If set, paths connect only to those linestrings or points.\n"
-              << "  --candidate-access-points-search-distance <length> Buffer distance for candidate access points search when road dataset not provided (default: 1500)\n"
-              << "  --min-polygon-boundary-segment-length-for-nearest-road-edge-detection <length> Minimum polygon boundary segment length for nearest road edge detection (default: 80.0)\n"
-              << "  --include-network-distance    A flag argument that will include network distance in addition to access distance (structure-road) in the objective function of path finding algorithm (default: not included)\n"
-              << "  --graph-vertex-snapping-tolerance <value> Distance tolerance for snapping graph vertices (default: 1e-6)\n"
-              << "  --output-road-access-point    Output road access point file (last point of each path linestring) when road dataset is provided; useful for preliminary discrete access points to review before re-running without road network (default: false)\n"
-              << "\nFor neighboring-points mode, additional optional arguments:\n"
-              << "  --intersection-vertex-distance-threshold <value> Any point snapped to within this threshold from a road intersection will be subject to neighbor search from all outgoing directions from the intersection (default: 60.0)\n"
-              << "  --cutoff <value>               If the path distance exceeds this cutoff and still no neighbor found along a given travel direction, the search along this direction will stop\n"
-              << "\nFor line-of-sight-visibility mode, additional required arguments:\n"
-              << "  --dem-file-path <path>         Path to the DEM GeoTIFF file\n"
-              << "\nFor line-of-sight-visibility mode, additional optional arguments:\n"
-              << "  --road-sample-interval <value> Spacing between road samples in CRS units (default: 150)\n"
-              << "  --visibility-range <value>     Maximum distance for line-of-sight checks in CRS units (default: 63360, e.g. 12 miles in feet)\n"
-              << "  --min-road-length-to-include <value> Roads shorter than this are skipped (default: 20)\n"
-              << "\nFor dissolve-adjacent-polygons mode, additional required arguments:\n"
-              << "  --polygon-file-path <path>   Path to the polygon input file\n"
-              << "\nFor dissolve-adjacent-polygons mode, additional optional arguments:\n"
-              << "  --polygon-layer-index <index> Layer index to read from polygon file (default: 0)\n"
-              << "\nExamples:\n"
-              << "  " << programName << " --road-file-path roads.gpkg --point-file-path points.gpkg --mode road-segmentation --output-file results.geojson --distance-breakpoints 100,200,300 --reproject-to-epsg4326\n"
-              << "  " << programName << " --road-file-path roads.gpkg --point-file-path points.gpkg --building-file-path buildings.gpkg --mode structure-access --output-file structure_results.geojson\n"
-              << "  " << programName << " --road-file-path roads.gpkg --point-file-path points.gpkg --mode neighboring-points --output-file neighboring_results.geojson --intersection-vertex-distance-threshold 50.0 --cutoff 200.0\n"
-              << "  " << programName << " --road-file-path roads.gpkg --point-file-path ignitions.gpkg --dem-file-path dem.tif --mode line-of-sight-visibility --output-file visibility_analysis.h5 --road-sample-interval 150 --visibility-range 63360\n"
-              << "  " << programName << " --mode dissolve-adjacent-polygons --polygon-file-path parcels.gpkg --output-file dissolved_parcels.geojson --reproject-to-epsg4326\n"
-              << "\nUse --help for detailed parameter explanations and examples.\n"
-              << "Use --version to display version information.\n";
-}
-
-void printDetailedHelp(const char* programName) {
+void printHelp(const char* programName) {
     std::cout << "AdjFind - Adjacency/Proximity Path Finding Tools\n"
               << "==============================================\n\n"
               << "AdjFind is a C++ application that provides specialized path finding algorithms related to adjacency/proximity.\n\n"
@@ -155,7 +103,7 @@ void printDetailedHelp(const char* programName) {
               << "     " << programName << " --road-file-path roads.gpkg --point-file-path points.gpkg --mode neighboring-points --output-file neighboring_results.geojson\n\n"
               << "3. LINE-OF-SIGHT VISIBILITY MODE (--mode line-of-sight-visibility)\n"
               << "   Determines which road locations can observe ignition points (e.g. wildfire ignitions) accounting for terrain obstruction (DEM).\n"
-              << "   Outputs HDF5 with road sample points, distance matrix, and sparse visibility pairs for optimization.\n\n"
+              << "   Outputs HDF5 with road sample points, distance matrix, and visibility matrix for optimization.\n\n"
               << "   Required Arguments:\n"
               << "     --road-file-path <path>     Path to the road network file\n"
               << "     --point-file-path <path>    Path to ignition points file\n"
@@ -221,7 +169,7 @@ void printDetailedHelp(const char* programName) {
               << "  - Points don't need to be on road linestrings\n"
               << "  - Euclidean-distance based snapping will be performed\n\n"
               << "OTHER OPTIONS:\n"
-              << "  --help, -h     Show this detailed help message\n"
+              << "  --help, -h     Show this help message\n"
               << "  --version, -v  Show version information\n";
 }
 
@@ -812,7 +760,7 @@ void processDissolveAdjacentPolygonsMode(const std::unordered_map<std::string, s
 
 int main(int argc, char* argv[]) {
     if (argc < 2) {
-        printUsage(argv[0]);
+        printHelp(argv[0]);
         return 1;
     }
     
@@ -821,13 +769,13 @@ int main(int argc, char* argv[]) {
         
         // Check for help flag first
         if (args.count("help") > 0 || args.count("h") > 0) {
-            printDetailedHelp(argv[0]);
+            printHelp(argv[0]);
             return 0;
         }
         
         // Check for version flag
         if (args.count("version") > 0 || args.count("v") > 0) {
-            std::cout << "AdjFind v0.2.1\n";
+            std::cout << "AdjFind v" << ADJFIND_VERSION << "\n";
             std::cout << "Adjacency/Proximity Path Finding Tool\n";
             std::cout << "Copyright (c) 2026 Zifan Wang\n";
             std::cout << "MIT License\n";
@@ -836,7 +784,7 @@ int main(int argc, char* argv[]) {
         
         if (args.count("mode") == 0) {
             std::cerr << "Error: --mode is required" << std::endl;
-            printUsage(argv[0]);
+            printHelp(argv[0]);
             return 1;
         }
         
@@ -844,36 +792,36 @@ int main(int argc, char* argv[]) {
         
         if (args.count("output-file") == 0) {
             std::cerr << "Error: --output-file is required" << std::endl;
-            printUsage(argv[0]);
+            printHelp(argv[0]);
             return 1;
         }
         
         if (mode != "dissolve-adjacent-polygons" && args.count("point-file-path") == 0) {
             std::cerr << "Error: --point-file-path is required" << std::endl;
-            printUsage(argv[0]);
+            printHelp(argv[0]);
             return 1;
         }
         
         // Check for road-file-path (required for all modes except structure-access and dissolve-adjacent-polygons)
         if (mode != "structure-access" && mode != "dissolve-adjacent-polygons" && args.count("road-file-path") == 0) {
             std::cerr << "Error: --road-file-path is required for mode '" << mode << "'" << std::endl;
-            printUsage(argv[0]);
+            printHelp(argv[0]);
             return 1;
         }
         
         if (mode == "structure-access" && args.count("building-file-path") == 0) {
             std::cerr << "Error: --building-file-path is required for structure-access mode" << std::endl;
-            printUsage(argv[0]);
+            printHelp(argv[0]);
             return 1;
         }
         if (mode == "line-of-sight-visibility" && args.count("dem-file-path") == 0) {
             std::cerr << "Error: --dem-file-path is required for line-of-sight-visibility mode" << std::endl;
-            printUsage(argv[0]);
+            printHelp(argv[0]);
             return 1;
         }
         if (mode == "dissolve-adjacent-polygons" && args.count("polygon-file-path") == 0) {
             std::cerr << "Error: --polygon-file-path is required for dissolve-adjacent-polygons mode" << std::endl;
-            printUsage(argv[0]);
+            printHelp(argv[0]);
             return 1;
         }
         
@@ -889,7 +837,7 @@ int main(int argc, char* argv[]) {
             processDissolveAdjacentPolygonsMode(args);
         } else {
             std::cerr << "Error: Unknown mode '" << mode << "'" << std::endl;
-            printUsage(argv[0]);
+            printHelp(argv[0]);
             return 1;
         }
         

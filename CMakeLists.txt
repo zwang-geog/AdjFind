@@ -1,5 +1,8 @@
 cmake_minimum_required(VERSION 3.16)
-project(adjfind VERSION 0.2.1)
+
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/VERSION" ADJFIND_VERSION_RAW)
+string(STRIP "${ADJFIND_VERSION_RAW}" ADJFIND_VERSION)
+project(adjfind VERSION ${ADJFIND_VERSION})
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -62,10 +65,18 @@ set(HEADERS
 )
 
 # Create executable
+configure_file(
+    "${CMAKE_CURRENT_SOURCE_DIR}/include/adjfind_version.hpp.in"
+    "${CMAKE_CURRENT_BINARY_DIR}/include/adjfind_version.hpp"
+    @ONLY
+)
+
 add_executable(adjfind ${SOURCES} ${HEADERS})
 
-# Link libraries using modern CMake targets
-target_include_directories(adjfind PRIVATE ${HDF5_INCLUDE_DIRS})
+target_include_directories(adjfind PRIVATE
+    "${CMAKE_CURRENT_BINARY_DIR}/include"
+    ${HDF5_INCLUDE_DIRS}
+)
 target_link_libraries(adjfind
     PRIVATE
     GDAL::GDAL
