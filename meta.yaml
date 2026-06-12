@@ -1,4 +1,4 @@
-{% set version = "0.2.1" %}
+{% set version = "0.2.2" %}
 
 package:
   name: adjfind
@@ -6,10 +6,10 @@ package:
 
 source:
   url: https://github.com/zwang-geog/AdjFind/archive/refs/tags/v{{ version }}.tar.gz
-  sha256: c38373b8c0246245e7d12f11715ec9cd2e9fb61f3c1495ad4f425f737a96e606
+  sha256: e5867d5c90080b64bbf8afd5351442f987df0047ade300604d713774ccb843cc
 
 build:
-  number: 1
+  number: 0
   script: |
     cmake -B build -S . ${CMAKE_ARGS}  # [unix]
     cmake -B build -S . %CMAKE_ARGS%  # [win]
@@ -40,10 +40,12 @@ about:
   license_file: LICENSE
   summary: CLI of specialized path finding algorithms related to adjacency/proximity
   description: |
-    The command-line tool supports three main modes:
+    The command-line tool supports five main modes:
     • Road Segmentation Mode: Determines which service points (e.g., hydrants) are closest to each road segment using network distance, and optionally splits roads into discrete distance categories for service area analysis.
     • Neighboring Points Mode: Identifies the nearest neighboring service points along a road network in each direction, calculating spacing distances between facilities like hydrants for regulatory compliance assessment.
     • Structure Access Mode: Computes shortest unobstructed paths between building corners and road networks (e.g., assume fire engines can park anywhere along the provided road network) if road network is provided, or between building corners and access points (e.g., specific locations where fire engines can park) if road network is not provided. Moreover, it finds the least accessible points (a.k.a. furthest points) on buildings for emergency response planning and fire code compliance.
+    • Line-of-Sight Visibility Mode: Samples a road network at discrete intervals and performs pairwise line-of-sight checks between each road sample and point features (e.g., wildland fire ignition locations) using a digital elevation model, accounting for terrain obstruction along sight lines. Outputs dense distance and visibility matrices for downstream analysis such as optimal placement of fire detection resources.
+    • Dissolve Adjacent Polygons Mode: Groups spatially adjacent or overlapping polygons into connected components and geometrically unions each component. Recommended as a preprocessing step before structure-access mode to merge fragmented building footprints into single polygons per building.
   doc_url: https://github.com/zwang-geog/AdjFind/blob/master/README.md
   dev_url: https://github.com/zwang-geog/AdjFind
 
